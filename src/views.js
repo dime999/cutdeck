@@ -485,6 +485,61 @@ function videoNewPage(ctx, { source, bumpers }) {
   );
 }
 
+function videoMergePage(ctx, { groups, ffmpegOk }) {
+  const available = groups
+    .filter(([, items]) => items.length)
+    .map(
+      ([label, items]) => `<h3 class="pick-group">${label}</h3>
+    <ul class="pick-list">${items
+      .map(
+        (p) => `<li>
+        <div class="grow">
+          <strong>${h(p.name)}</strong>
+          ${meta(fmtTime(p.duration), `${p.width}×${p.height}`)}
+        </div>
+        <button type="button" data-add="${p.kind}:${p.id}" data-name="${h(p.name)}" data-duration="${p.duration}" data-size="${p.width}×${p.height}">Add</button>
+      </li>`
+      )
+      .join('')}</ul>`
+    )
+    .join('');
+  return layout(
+    ctx,
+    'Merge videos',
+    `<div class="page-head">
+  <h1>Merge videos</h1>
+  <a class="button" href="/videos">Back</a>
+</div>
+${ffmpegNotice(ffmpegOk)}
+${
+  available
+    ? `<div class="grid">
+  <section class="card">
+    <h2>Add parts</h2>
+    <p class="muted small">Add the parts in the order you want them. The same part can be added more than once.</p>
+    ${available}
+  </section>
+
+  <section class="card">
+    <h2>Order</h2>
+    <form method="post" action="/videos/merge" id="merge-form" class="stack">
+      <ol class="merge-list" id="merge-list"></ol>
+      <p class="muted" id="merge-empty">Nothing added yet. The parts are joined from top to bottom.</p>
+      <p class="meta" id="merge-total" hidden></p>
+      <label>Frame size
+        <select name="main" id="merge-main"></select>
+      </label>
+      <label>Title <span class="muted">(optional)</span><input name="title" maxlength="100"></label>
+      <p class="muted small">The video takes the size of the part you pick under “Frame size”. Parts with a different shape are fitted into the frame with black bars. Everything is encoded again, so long videos take a while.</p>
+      <button class="primary big" id="merge-submit" disabled>Create video</button>
+    </form>
+  </section>
+</div>`
+    : '<div class="empty">There is nothing to merge yet. Scan a recording or create a Short first. <a class="button primary" href="/recordings">Go to Recordings</a></div>'
+}`
+  );
+}
+
 function videosPage(ctx, { videos, ffmpegOk }) {
   const tiles = videos
     .map((v) => {
@@ -525,11 +580,14 @@ function videosPage(ctx, { videos, ffmpegOk }) {
     'Videos',
     `<div class="page-head">
   <h1>Videos</h1>
-  <a class="button" href="/bumpers">Intros and outros</a>
+  <div class="head-actions">
+    <a class="button" href="/bumpers">Intros and outros</a>
+    <a class="button primary" href="/videos/merge">Merge videos</a>
+  </div>
 </div>
 ${ffmpegNotice(ffmpegOk)}
 <div id="live-videos" data-live>
-${videos.length ? `<ul class="thumbs">${tiles}</ul>` : '<div class="empty">Open a recording or a Short and select “Add intro and outro” to create a finished video.</div>'}
+${videos.length ? `<ul class="thumbs">${tiles}</ul>` : '<div class="empty">Select “Merge videos” to join several videos into one, or open a recording or a Short and select “Add intro and outro”.</div>'}
 ${studioPoll(busy && ffmpegOk)}
 </div>`
   );
@@ -607,6 +665,7 @@ module.exports = {
   thumbnailEditorPage,
   bumpersPage,
   videoNewPage,
+  videoMergePage,
   videosPage,
   privacyPage,
   termsPage,

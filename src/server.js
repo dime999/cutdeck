@@ -575,6 +575,59 @@ route('POST', '/videos', async (ctx) => {
   redirect(ctx, '/videos');
 });
 
+// Spajanje više videa: dijelovi mogu biti snimci, Shorts i intro/outro klipovi, bilo kojim redom.
+const MAX_MERGE_PARTS = 30;
+
+function mergePart(userId, kind, id) {
+  if (kind !== 'bumper') return exportSource(userId, kind, id);
+  const b = db.prepare('SELECT * FROM bumpers WHERE id=? AND user_id=?').get(id, userId);
+  return b && { kind, id: b.id, name: b.name, duration: b.duration, width: b.width, height: b.height };
+}
+
+route('GET', '/videos/merge', (ctx) => {
+  const uid = ctx.user.id;
+  const recordings = db.prepare("SELECT id FROM recordings WHERE user_id=? AND hidden=0 AND status='ready' ORDER BY id DESC").all(uid);
+  const clips = db.prepare("SELECT id FROM clips WHERE user_id=? AND status='ready' ORDER BY id DESC").all(uid);
+  const bumpers = db.prepare('SELECT id FROM bumpers WHERE user_id=? ORDER BY name COLLATE NOCASE').all(uid);
+  const load = (kind, rows) => rows.map((r) => mergePart(uid, kind, r.id));
+  html(
+    ctx,
+    views.videoMergePage(ctx, {
+      groups: [
+        ['Recordings', load('recording', recordings)],
+        ['Shorts', load('clip', clips)],
+        ['Intros and outros', load('bumper', bumpers)],
+      ],
+      ffmpegOk: media.isAvailable(),
+    })
+  );
+});
+
+route('POST', '/videos/merge', async (ctx) => {
+  const form = await readForm(ctx.req);
+  const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, '/videos/merge'));
+  const chosen = form.getAll('parts');
+  if (!media.isAvailable()) return fail('ffmpeg is not installed, so videos cannot be created yet.');
+  if (chosen.length < 2) return fail('Add at least two parts to merge.');
+  if (chosen.length > MAX_MERGE_PARTS) return fail(`A video can have at most ${MAX_MERGE_PARTS} parts.`);
+
+  const parts = [];
+  for (const value of chosen) {
+    const [kind, id] = value.split(':');
+    const part = mergePart(ctx.user.id, kind, Number(id));
+    if (!part) return fail('One of the parts no longer exists or is not ready. Choose the parts again.');
+    parts.push({ kind: part.kind, id: part.id, name: part.name });
+  }
+  // Dio koji određuje veličinu kadra; ako nije zadan, prvi.
+  const main = Number(form.get('main'));
+  parts[Number.isInteger(main) && main >= 0 && main < parts.length ? main : 0].main = true;
+
+  const title = (form.get('title') || '').trim().slice(0, 100) || `${parts[0].name} + ${parts.length - 1} more`.slice(0, 100);
+  studio.createExport(ctx.user.id, { title, parts });
+  flash(ctx, 'ok', `Video “${title}” is being created.`);
+  redirect(ctx, '/videos');
+});
+
 route('GET', '/videos/:id/file', (ctx) => {
   const video = userExport(ctx);
   if (!video || video.status !== 'ready') return html(ctx, views.errorPage(ctx, 404, 'This video does not exist.'), 404);

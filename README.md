@@ -10,9 +10,8 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Reže izabrani dio u vertikalni Short (1080×1920), sa cijelim kadrom na zamućenoj pozadini ili izrezom dijela slike.
 - Pravi thumbnail (JPG 1280×720) od kadra iz snimka, sa tekstom i doradom slike.
 - Dodaje intro i outro na cijeli snimak ili na Short i pravi gotov video.
+- Spaja više videa (snimke, Shorts, intro i outro klipove) u jedan, redom koji zadaš.
 - Nema prijave: aplikacija je za jednog korisnika i dostupna je samo sa računara na kojem radi.
-
-**Šta je u planu:** spajanje više videa u jedan.
 
 Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga sam kroz YouTube Studio.
 
@@ -63,6 +62,15 @@ Spremljeni thumbnail se ne može naknadno uređivati; za izmjenu napravi novi.
 4. Gotov video je na stranici **Videos**, odakle ga skidaš dugmetom **Download**. Dok se pravi, možeš ga prekinuti dugmetom **Cancel**.
 
 Gotov video ima veličinu glavnog videa. Klip drugačijeg oblika (npr. vodoravni intro na vertikalnom Shortu) uklapa se u kadar sa crnim rubovima, a klip bez zvuka dobija tišinu. Cijeli video se kodira iznova, pa dug snimak traje.
+
+## Spajanje više videa
+
+1. Na stranici **Videos** klikni **Merge videos**.
+2. Dugmetom **Add** dodaj dijelove redom kojim trebaju ići: snimke, Shorts ili intro i outro klipove. Isti dio možeš dodati više puta.
+3. Strelicama promijeni redoslijed, a pod **Frame size** izaberi dio čiju veličinu uzima gotov video.
+4. Klikni **Create video**. Rezultat je na stranici **Videos**.
+
+Vrijede ista pravila kao kod intra i outra: dijelovi drugačijeg oblika dobijaju crne rubove, a sve se kodira iznova.
 
 ## Gdje su podaci
 

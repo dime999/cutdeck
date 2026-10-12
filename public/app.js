@@ -540,6 +540,66 @@ if (bumperForm) {
   });
 }
 
+// ── Spajanje više videa ───────────────────────────────────
+const mergeForm = document.getElementById('merge-form');
+if (mergeForm) {
+  const list = document.getElementById('merge-list');
+  const mainSelect = document.getElementById('merge-main');
+  const total = document.getElementById('merge-total');
+  const parts = []; // redom kojim se spajaju; `main` određuje veličinu kadra
+  const fmt = (t) => {
+    const s = Math.round(t);
+    const mmss = `${String(Math.floor((s % 3600) / 60)).padStart(s >= 3600 ? 2 : 1, '0')}:${String(s % 60).padStart(2, '0')}`;
+    return s >= 3600 ? `${Math.floor(s / 3600)}:${mmss}` : mmss;
+  };
+  const make = (tag, props = {}, ...children) => {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...children);
+    return node;
+  };
+
+  function render() {
+    if (parts.length && !parts.some((p) => p.main)) parts[0].main = true;
+    list.textContent = '';
+    mainSelect.textContent = '';
+    parts.forEach((p, i) => {
+      const move = (label, text, to) => make('button', { type: 'button', ariaLabel: `${label} “${p.name}”`, title: label, disabled: to < 0 || to >= parts.length, onclick: () => swap(i, to) }, text);
+      list.append(
+        make(
+          'li',
+          {},
+          make('div', { className: 'grow' }, make('strong', {}, p.name), make('p', { className: 'meta' }, make('span', {}, fmt(p.duration)), make('span', {}, p.size))),
+          make('div', { className: 'tl-group' }, move('Move up', '↑', i - 1), move('Move down', '↓', i + 1)),
+          make('button', { type: 'button', className: 'danger-outline', onclick: () => remove(i) }, 'Remove'),
+          make('input', { type: 'hidden', name: 'parts', value: p.value })
+        )
+      );
+      mainSelect.append(make('option', { value: String(i), selected: Boolean(p.main) }, `${i + 1}. ${p.name} (${p.size})`));
+    });
+    document.getElementById('merge-empty').hidden = parts.length > 0;
+    total.hidden = parts.length === 0;
+    total.textContent = `${parts.length} ${parts.length === 1 ? 'part' : 'parts'}, ${fmt(parts.reduce((sum, p) => sum + p.duration, 0))} in total`;
+    document.getElementById('merge-submit').disabled = parts.length < 2;
+  }
+  function swap(i, j) {
+    [parts[i], parts[j]] = [parts[j], parts[i]];
+    render();
+  }
+  function remove(i) {
+    parts.splice(i, 1);
+    render();
+  }
+
+  mainSelect.addEventListener('change', () => parts.forEach((p, i) => (p.main = i === Number(mainSelect.value))));
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('button[data-add]');
+    if (!button) return;
+    parts.push({ value: button.dataset.add, name: button.dataset.name, duration: Number(button.dataset.duration), size: button.dataset.size, main: false });
+    render();
+  });
+  render();
+}
+
 // Pregled Shorta dok je miš iznad njega
 document.addEventListener(
   'mouseenter',
