@@ -11,7 +11,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const cfg = require('./config');
 
-for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir]) {
+for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir, cfg.thumbnailsDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 const db = new DatabaseSync(path.join(cfg.dataDir, 'app.db'));
@@ -71,6 +71,17 @@ CREATE TABLE IF NOT EXISTS clips (
   created_at     TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS clips_status ON clips(status);
+
+CREATE TABLE IF NOT EXISTS thumbnails (
+  id             INTEGER PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recording_id   INTEGER REFERENCES recordings(id) ON DELETE SET NULL,
+  recording_name TEXT NOT NULL,
+  title          TEXT NOT NULL,
+  path           TEXT NOT NULL,
+  size           INTEGER NOT NULL,
+  created_at     TEXT NOT NULL
+);
 `);
 
 // Kolone dodane nakon što je tabela već mogla biti napravljena.

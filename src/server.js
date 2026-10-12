@@ -2,6 +2,7 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 const cfg = require('./lib/config');
 const db = require('./lib/db');
@@ -363,6 +364,81 @@ route(
     });
   }
 );
+
+// ── Rute: thumbnailovi ────────────────────────────────────
+const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
+const userThumbnail = (ctx) => db.prepare('SELECT * FROM thumbnails WHERE id=? AND user_id=?').get(Number(ctx.params.id), ctx.user.id);
+
+route('GET', '/thumbnails', (ctx) => {
+  const thumbnails = db.prepare('SELECT * FROM thumbnails WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
+  html(ctx, views.thumbnailsPage(ctx, { thumbnails }));
+});
+
+route('GET', '/recordings/:id/thumbnail', (ctx) => {
+  const rec = userRecording(ctx);
+  if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
+  if (rec.status !== 'ready') {
+    flash(ctx, 'bad', 'Wait for the analysis of this recording to finish.');
+    return redirect(ctx, `/recordings/${rec.id}`);
+  }
+  const moments = db.prepare('SELECT * FROM moments WHERE recording_id=? ORDER BY start_s').all(rec.id);
+  // Bez zadanog vremena kreće od sredine prvog predloženog trenutka.
+  const asked = Number(ctx.query.get('t'));
+  const fallback = moments.length ? (moments[0].start_s + moments[0].end_s) / 2 : rec.duration * 0.1;
+  const time = ctx.query.get('t') && asked >= 0 && asked <= rec.duration ? asked : fallback;
+  html(ctx, views.thumbnailEditorPage(ctx, { rec, moments, time: Math.round(time * 20) / 20 }));
+});
+
+// Preglednik šalje gotovu sliku (JPG) koju je iscrtao editor.
+route('PUT', '/api/recordings/:id/thumbnails', async (ctx) => {
+  const rec = userRecording(ctx);
+  if (!rec) return json(ctx, { error: 'This recording does not exist.' }, 404);
+  const chunks = [];
+  let size = 0;
+  // Prevelika slika se pročita do kraja bez čuvanja, da preglednik dobije odgovor umjesto prekinute veze.
+  for await (const chunk of ctx.req) {
+    size += chunk.length;
+    if (size <= MAX_THUMBNAIL_BYTES) chunks.push(chunk);
+  }
+  if (size > MAX_THUMBNAIL_BYTES) return json(ctx, { error: 'The picture is larger than 5 MB.' }, 413);
+  const image = Buffer.concat(chunks);
+  if (image.length < 4 || image[0] !== 0xff || image[1] !== 0xd8) return json(ctx, { error: 'The picture is not a JPG.' }, 400);
+
+  let title = '';
+  try {
+    title = decodeURIComponent(ctx.req.headers['x-title'] || '');
+  } catch {}
+  title = title.replace(/\s+/g, ' ').trim().slice(0, 100) || path.parse(rec.name).name.slice(0, 100);
+  const file = path.join(cfg.thumbnailsDir, `${crypto.randomBytes(16).toString('hex')}.jpg`);
+  fs.writeFileSync(file, image);
+  db.prepare('INSERT INTO thumbnails (user_id, recording_id, recording_name, title, path, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+    ctx.user.id,
+    rec.id,
+    rec.name,
+    title,
+    file,
+    image.length,
+    db.now()
+  );
+  flash(ctx, 'ok', `Thumbnail “${title}” has been saved.`);
+  json(ctx, { redirect: '/thumbnails' });
+});
+
+route('GET', '/thumbnails/:id/file', (ctx) => {
+  const thumb = userThumbnail(ctx);
+  if (!thumb) return html(ctx, views.errorPage(ctx, 404, 'This thumbnail does not exist.'), 404);
+  sendFile(ctx, thumb.path, ctx.query.get('download') ? `${thumb.title.replace(/[\/:*?"<>|]/g, ' ')}.jpg` : null);
+});
+
+route('POST', '/thumbnails/:id/delete', (ctx) => {
+  const thumb = userThumbnail(ctx);
+  if (thumb) {
+    fs.rm(thumb.path, { force: true }, () => {});
+    db.prepare('DELETE FROM thumbnails WHERE id=?').run(thumb.id);
+    flash(ctx, 'ok', 'The thumbnail has been deleted.');
+  }
+  redirect(ctx, '/thumbnails');
+});
 
 // ── Javne stranice ────────────────────────────────────────
 route('GET', '/privacy', (ctx) => html(ctx, views.privacyPage(ctx)));

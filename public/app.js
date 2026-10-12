@@ -310,6 +310,194 @@ if (player) {
   setupTimeline();
 }
 
+// ── Editor thumbnaila ─────────────────────────────────────
+// Kadar iz snimka i tekst iscrtavaju se na canvas 1280×720, koji se sprema kao JPG.
+const thumbCanvas = document.getElementById('thumb-canvas');
+if (thumbCanvas) {
+  const W = thumbCanvas.width;
+  const H = thumbCanvas.height;
+  const ctx = thumbCanvas.getContext('2d');
+  const video = document.getElementById('thumb-video');
+  const get = (id) => document.getElementById(id);
+  const num = (id) => Number(get(id).value);
+  const timeInput = get('thumb-time');
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  // Položaj teksta (sredina) i pomak slike, u pikselima canvasa.
+  const state = { textX: W / 2, textY: H * 0.78, panX: 0, panY: 0, color: '#ffffff' };
+  let textBox = null; // gdje je tekst iscrtan, da se zna da li ga miš hvata
+
+  const lines = () => {
+    const text = get('thumb-text').value.trim();
+    return (get('thumb-upper').checked ? text.toUpperCase() : text)
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .slice(0, 2);
+  };
+
+  function draw() {
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    if (video.readyState >= 2) {
+      // Slika uvijek prekriva cijeli canvas; zum je uvećava, a pomak bira koji dio ostaje.
+      const scale = Math.max(W / video.videoWidth, H / video.videoHeight) * num('thumb-zoom');
+      const dw = video.videoWidth * scale;
+      const dh = video.videoHeight * scale;
+      state.panX = clamp(state.panX, -(dw - W) / 2, (dw - W) / 2);
+      state.panY = clamp(state.panY, -(dh - H) / 2, (dh - H) / 2);
+      ctx.filter = `brightness(${num('thumb-brightness')}%) contrast(${num('thumb-contrast')}%) saturate(${num('thumb-saturation')}%)`;
+      ctx.drawImage(video, (W - dw) / 2 + state.panX, (H - dh) / 2 + state.panY, dw, dh);
+      ctx.filter = 'none';
+    }
+
+    const text = lines();
+    textBox = null;
+    if (!text.length) return;
+    const size = num('thumb-size');
+    const lineHeight = size * 1.08;
+    ctx.font = `${size}px ${get('thumb-font').value}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const width = Math.max(...text.map((l) => ctx.measureText(l).width));
+    const height = lineHeight * text.length;
+    state.textX = clamp(state.textX, 0, W);
+    state.textY = clamp(state.textY, 0, H);
+
+    if (get('thumb-shade').checked) {
+      // Zatamnjenje ide od ruba bližeg tekstu prema sredini slike.
+      const top = state.textY < H / 2;
+      const shade = ctx.createLinearGradient(0, top ? 0 : H, 0, top ? H * 0.6 : H * 0.4);
+      shade.addColorStop(0, 'rgba(0, 0, 0, 0.75)');
+      shade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = shade;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = size * 0.16;
+    ctx.strokeStyle = '#000';
+    ctx.fillStyle = state.color;
+    text.forEach((line, i) => {
+      const y = state.textY + (i - (text.length - 1) / 2) * lineHeight;
+      ctx.strokeText(line, state.textX, y);
+      ctx.fillText(line, state.textX, y);
+    });
+    textBox = { left: state.textX - width / 2, right: state.textX + width / 2, top: state.textY - height / 2, bottom: state.textY + height / 2 };
+  }
+
+  // ── Izbor kadra ──
+  const fmt = (t) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+  function seek(time) {
+    const t = clamp(time, 0, Number(timeInput.max));
+    timeInput.value = t;
+    get('thumb-time-label').textContent = fmt(t);
+    video.currentTime = t;
+  }
+  // Nakon premotavanja preglednik javi „seeked“ prije nego što je kadar zaista dostupan za crtanje,
+  // pa se crta i kad kadar stigne (requestVideoFrameCallback) i još jednom malo kasnije.
+  const frameChanged = () => {
+    draw();
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(draw);
+    setTimeout(draw, 200);
+  };
+  for (const type of ['seeked', 'loadeddata', 'canplay']) video.addEventListener(type, frameChanged);
+  if (video.readyState >= 1) seek(Number(timeInput.value));
+  else video.addEventListener('loadedmetadata', () => seek(Number(timeInput.value)), { once: true });
+  timeInput.addEventListener('input', () => seek(Number(timeInput.value)));
+
+  for (const input of document.querySelectorAll('#thumb-form input, #thumb-form select, #thumb-form textarea')) {
+    input.addEventListener('input', draw);
+  }
+
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+    if (button.dataset.step) seek(Number(timeInput.value) + Number(button.dataset.step));
+    else if (button.dataset.color) {
+      state.color = button.dataset.color;
+      for (const s of document.querySelectorAll('.swatch')) s.classList.toggle('is-picked', s === button);
+      draw();
+    } else if (button.id === 'thumb-reset') {
+      for (const id of ['thumb-zoom', 'thumb-brightness', 'thumb-contrast', 'thumb-saturation']) get(id).value = get(id).dataset.default;
+      state.panX = state.panY = 0;
+      draw();
+    }
+  });
+
+  // ── Vučenje: tekst se premješta, a uvećana slika pomjera ──
+  const toCanvas = (e) => {
+    const box = thumbCanvas.getBoundingClientRect();
+    return { x: ((e.clientX - box.left) / box.width) * W, y: ((e.clientY - box.top) / box.height) * H };
+  };
+  let dragging = null;
+  thumbCanvas.addEventListener('pointerdown', (e) => {
+    const p = toCanvas(e);
+    const onText = textBox && p.x >= textBox.left && p.x <= textBox.right && p.y >= textBox.top && p.y <= textBox.bottom;
+    dragging = { what: onText ? 'text' : 'pan', x: p.x, y: p.y };
+    e.preventDefault();
+    try {
+      thumbCanvas.setPointerCapture(e.pointerId);
+    } catch {}
+  });
+  thumbCanvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const p = toCanvas(e);
+    state[`${dragging.what}X`] += p.x - dragging.x;
+    state[`${dragging.what}Y`] += p.y - dragging.y;
+    dragging.x = p.x;
+    dragging.y = p.y;
+    draw();
+  });
+  const stopDragging = () => (dragging = null);
+  thumbCanvas.addEventListener('pointerup', stopDragging);
+  thumbCanvas.addEventListener('pointercancel', stopDragging);
+
+  // ── Spremanje ──
+  const errorBox = get('thumb-error');
+  const saveButton = get('thumb-save');
+  get('thumb-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    errorBox.hidden = true;
+    const fail = (message) => {
+      errorBox.textContent = message;
+      errorBox.hidden = false;
+      saveButton.disabled = false;
+    };
+    if (video.readyState < 2) return fail('The frame has not loaded yet. Wait a moment and save again.');
+    saveButton.disabled = true;
+    draw();
+    thumbCanvas.toBlob(
+      async (blob) => {
+        try {
+          const title = lines().join(' ') || thumbCanvas.dataset.name;
+          const r = await fetch(`/api/recordings/${thumbCanvas.dataset.recording}/thumbnails`, {
+            method: 'PUT',
+            headers: { 'content-type': 'image/jpeg', 'x-title': encodeURIComponent(title) },
+            body: blob,
+          });
+          const data = await r.json().catch(() => ({}));
+          if (r.ok && data.redirect) location.href = data.redirect;
+          else fail(data.error || `The thumbnail could not be saved (error ${r.status}).`);
+        } catch {
+          fail('The thumbnail could not be saved because the app did not respond.');
+        }
+      },
+      'image/jpeg',
+      0.92
+    );
+  });
+}
+
+// Dugme „Create thumbnail“ otvara editor na kadru koji je trenutno u playeru.
+const thumbLink = document.getElementById('thumb-link');
+if (thumbLink) {
+  thumbLink.addEventListener('click', () => {
+    const video = document.getElementById('player');
+    if (video && video.currentTime > 0) thumbLink.href = `${thumbLink.pathname}?t=${video.currentTime.toFixed(2)}`;
+  });
+}
+
 // Pregled Shorta dok je miš iznad njega
 document.addEventListener(
   'mouseenter',

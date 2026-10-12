@@ -24,7 +24,7 @@ function layout(ctx, title, body) {
 <body>
 <header class="top">
   <a class="brand" href="/">${h(cfg.appName)}</a>
-  <nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}</nav>
+  <nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}${nav('/thumbnails', 'Thumbnails')}</nav>
 </header>
 <main>
 ${flash}
@@ -249,7 +249,10 @@ ${
     rec.name,
     `<div class="page-head">
   <h1>${h(rec.name)}</h1>
-  <a class="button" href="/recordings">All recordings</a>
+  <div class="head-actions">
+    ${rec.status === 'ready' ? `<a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">Create thumbnail</a>` : ''}
+    <a class="button" href="/recordings">All recordings</a>
+  </div>
 </div>
 ${ffmpegNotice(ffmpegOk)}
 <div class="grid">
@@ -307,6 +310,108 @@ ${studioPoll(busy && ffmpegOk)}
   );
 }
 
+// ── Thumbnailovi ──────────────────────────────────────────
+const THUMB_COLORS = [
+  ['#ffffff', 'White'],
+  ['#ffe600', 'Yellow'],
+  ['#ff3b30', 'Red'],
+  ['#39e75f', 'Green'],
+  ['#33c6ff', 'Blue'],
+];
+
+function thumbnailsPage(ctx, { thumbnails }) {
+  const tiles = thumbnails
+    .map(
+      (t) => `<li class="thumb">
+      <a class="thumb-frame" href="/thumbnails/${t.id}/file" target="_blank" rel="noopener" title="Open “${h(t.title)}” full size">
+        <img src="/thumbnails/${t.id}/file" alt="" loading="lazy">
+      </a>
+      <strong class="short-title">${h(t.title)}</strong>
+      ${meta(h(t.recording_name), fmtSize(t.size), `<time data-local="${h(t.created_at)}">${h(t.created_at)}</time>`)}
+      <div class="short-actions">
+        <a class="button primary" href="/thumbnails/${t.id}/file?download=1">Download</a>
+        <form method="post" action="/thumbnails/${t.id}/delete" data-confirm="Delete the thumbnail “${h(t.title)}”?"><button class="danger-outline">Delete</button></form>
+      </div>
+    </li>`
+    )
+    .join('');
+  return layout(
+    ctx,
+    'Thumbnails',
+    `<div class="page-head">
+  <h1>Thumbnails</h1>
+  <a class="button primary" href="/recordings">Create from a recording</a>
+</div>
+${thumbnails.length ? `<ul class="thumbs">${tiles}</ul>` : '<div class="empty">Open a recording and select “Create thumbnail” to make the first one.</div>'}`
+  );
+}
+
+function thumbnailEditorPage(ctx, { rec, moments, time }) {
+  const range = (id, label, min, max, value, step = 1) =>
+    `<label>${label}<input type="range" id="${id}" min="${min}" max="${max}" step="${step}" value="${value}" data-default="${value}"></label>`;
+  const steps = [[-1, '−1 s'], [-0.1, '−0.1 s'], [0.1, '+0.1 s'], [1, '+1 s']];
+  return layout(
+    ctx,
+    'Create thumbnail',
+    `<div class="page-head">
+  <h1>Create thumbnail</h1>
+  <a class="button" href="/recordings/${rec.id}">Back to the recording</a>
+</div>
+<div class="grid">
+  <section class="card">
+    <canvas class="thumb-canvas" id="thumb-canvas" width="1280" height="720" data-recording="${rec.id}" data-name="${h(rec.name.replace(/\.[^.]+$/, ''))}"></canvas>
+    <video class="thumb-source" id="thumb-video" src="/recordings/${rec.id}/file" preload="auto" muted playsinline></video>
+    <p class="small muted">Drag the text to place it. When zoomed in, drag the picture to choose what stays in the frame.</p>
+
+    <h2>Frame</h2>
+    ${timeline(rec, moments)}
+    <input type="range" id="thumb-time" min="0" max="${rec.duration}" step="0.05" value="${time}" aria-label="Time of the frame">
+    <div class="tl-tools">
+      <div class="tl-group" role="group" aria-label="Move the frame">
+        ${steps.map(([s, label]) => `<button type="button" data-step="${s}">${label}</button>`).join('')}
+      </div>
+      <span class="muted small" id="thumb-time-label"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <form id="thumb-form" class="stack">
+      <h2>Text</h2>
+      <label>Text <span class="muted">(optional, up to two lines)</span>
+        <textarea id="thumb-text" rows="2" maxlength="80" placeholder="FIRST HEIST GONE WRONG"></textarea>
+      </label>
+      <label class="check"><input type="checkbox" id="thumb-upper" checked> Write it in capitals</label>
+      <label>Font
+        <select id="thumb-font">
+          <option value="Impact, 'Arial Black', sans-serif">Impact</option>
+          <option value="'Arial Black', Arial, sans-serif">Arial Black</option>
+        </select>
+      </label>
+      ${range('thumb-size', 'Size', 50, 260, 130)}
+      <div>
+        <span class="field-label">Color</span>
+        <div class="swatches" role="group" aria-label="Text color">
+          ${THUMB_COLORS.map(([c, name], i) => `<button type="button" class="swatch${i ? '' : ' is-picked'}" data-color="${c}" style="background:${c}" title="${name}" aria-label="${name}"></button>`).join('')}
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="thumb-shade" checked> Darken the picture behind the text</label>
+
+      <h2>Picture</h2>
+      ${range('thumb-zoom', 'Zoom', 1, 3, 1, 0.01)}
+      ${range('thumb-brightness', 'Brightness', 60, 150, 100)}
+      ${range('thumb-contrast', 'Contrast', 70, 160, 100)}
+      ${range('thumb-saturation', 'Color strength', 40, 200, 100)}
+      <button type="button" id="thumb-reset">Reset picture</button>
+
+      <p class="error" id="thumb-error" hidden></p>
+      <button class="primary big" id="thumb-save">Save thumbnail</button>
+      <p class="muted small">Saved as a 1280×720 JPG, the size YouTube asks for.</p>
+    </form>
+  </section>
+</div>`
+  );
+}
+
 // ── Pravne stranice ───────────────────────────────────────
 function privacyPage(ctx) {
   const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the person who runs this copy of the app';
@@ -322,7 +427,7 @@ function privacyPage(ctx) {
 <h2>What the app stores</h2>
 <ul>
   <li><strong>Your recordings:</strong> the video files you copy into the recordings folder, plus what the app works out from them: length, resolution, loudness over time and a thumbnail.</li>
-  <li><strong>What you create:</strong> the Shorts you cut and the titles you give them.</li>
+  <li><strong>What you create:</strong> the Shorts you cut, the thumbnails you make and the titles you give them.</li>
 </ul>
 
 <h2>How the data is used</h2>
@@ -375,6 +480,8 @@ module.exports = {
   recordingsPage,
   recordingPage,
   shortsPage,
+  thumbnailsPage,
+  thumbnailEditorPage,
   privacyPage,
   termsPage,
   errorPage,

@@ -8,9 +8,10 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Vodi biblioteku snimaka iz jednog foldera, sa sličicom i vremenskom trakom glasnoće.
 - Predlaže najglasnije trenutke svakog snimka kao kandidate za Shorts.
 - Reže izabrani dio u vertikalni Short (1080×1920), sa cijelim kadrom na zamućenoj pozadini ili izrezom dijela slike.
+- Pravi thumbnail (JPG 1280×720) od kadra iz snimka, sa tekstom i doradom slike.
 - Nema prijave: aplikacija je za jednog korisnika i dostupna je samo sa računara na kojem radi.
 
-**Šta je u planu:** pravljenje thumbnailova, dodavanje intra i outra, spajanje više videa u jedan.
+**Šta je u planu:** dodavanje intra i outra, spajanje više videa u jedan.
 
 Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga sam kroz YouTube Studio.
 
@@ -43,11 +44,22 @@ Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga s
 
 Prijedlozi se zasnivaju samo na glasnoći zvuka, pa ih uvijek pregledaj prije rezanja. Uklanjanje snimka sa liste ne briše fajl sa diska.
 
+## Thumbnail
+
+1. Otvori snimak i klikni **Create thumbnail**. Editor se otvara na kadru koji je u tom trenutku u playeru.
+2. Klizačem i dugmadima **±0.1 s** i **±1 s** izaberi tačan kadar.
+3. Upiši tekst (do dva reda), izaberi font, veličinu i boju, pa ga mišem odvuci na mjesto.
+4. Po potrebi uvećaj sliku i odvuci je da izabereš šta ostaje u kadru, te podesi svjetlinu, kontrast i jačinu boja.
+5. Klikni **Save thumbnail**. Gotovi thumbnailovi su na stranici **Thumbnails**, odakle ih skidaš dugmetom **Download**.
+
+Spremljeni thumbnail se ne može naknadno uređivati; za izmjenu napravi novi.
+
 ## Gdje su podaci
 
-- `data/app.db` je baza (snimci i Shorts).
+- `data/app.db` je baza (snimci, Shorts i thumbnailovi).
 - `data/recordings/` su tvoji snimci gameplaya.
-- `data/shorts/` su izrezani Shorts, a `data/thumbs/` sličice.
+- `data/shorts/` su izrezani Shorts, a `data/thumbnails/` thumbnailovi koje si napravio.
+- `data/thumbs/` su sličice za prikaz u aplikaciji.
 - `.env` sadrži podešavanja.
 
 Folder `data/` i fajl `.env` nisu u gitu. Napravi im rezervnu kopiju ako ti je sadržaj bitan.

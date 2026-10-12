@@ -28,6 +28,7 @@ module.exports = {
   recordingsDir: path.resolve(ROOT, env.RECORDINGS_DIR || 'data/recordings'),
   shortsDir: path.join(ROOT, 'data', 'shorts'),
   thumbsDir: path.join(ROOT, 'data', 'thumbs'),
+  thumbnailsDir: path.join(ROOT, 'data', 'thumbnails'),
   ffmpeg: findTool('ffmpeg', env.FFMPEG_PATH),
   ffprobe: findTool('ffprobe', env.FFPROBE_PATH),
   // Nema prijave, pa se aplikacija javlja samo na ovom računaru.
