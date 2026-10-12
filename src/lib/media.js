@@ -1,11 +1,15 @@
 'use strict';
 // ffmpeg / ffprobe: analiza zvuka, prijedlog zanimljivih trenutaka i rezanje u 9:16.
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
 const { spawn, spawnSync } = require('node:child_process');
 const cfg = require('./config');
 
 const RATE = 8000; // uzoraka u sekundi za analizu zvuka
 const OUT_W = 1080;
 const OUT_H = 1920;
+const SHORT_SIZE = { width: OUT_W, height: OUT_H };
 const LAYOUTS = [
   ['blur', 'Whole frame on a blurred background'],
   ['center', 'Crop to the center'],
@@ -217,4 +221,149 @@ async function renderJoined(job, onProgress, signal) {
   await run(cfg.ffmpeg, joinArgs(job), progressParser(total, onProgress), signal);
 }
 
-module.exports = { LAYOUTS, isAvailable, probe, audioLevels, findMoments, waveform, thumbnail, renderArgs, renderShort, joinArgs, renderJoined };
+// ── Titlovi: prepoznavanje govora i upisivanje u sliku ────
+const CAPTION_CHARS = 20; // najviše znakova u jednom titlu: kratki redovi se na Shortu lakše čitaju
+const CAPTION_FONTS = [
+  ['Impact', 'Impact'],
+  ['Arial Black', 'Arial Black'],
+];
+const CAPTION_SIZES = { small: 0.038, medium: 0.05, large: 0.064 }; // udio visine videa
+const CAPTION_POSITIONS = ['bottom', 'middle', 'top'];
+const DEFAULT_CAPTION_STYLE = { font: 'Impact', size: 'medium', color: '#ffffff', position: 'bottom', upper: true };
+
+// Putanja kao vrijednost opcije filtera: dvotačka se mora označiti, a navodnici čuvaju razmake.
+function filterPath(p) {
+  if (p.includes("'")) throw new Error(`The path ${p} contains an apostrophe, which ffmpeg filters cannot read.`);
+  return `'${p.replace(/\\/g, '/').replace(/:/g, '\\:')}'`;
+}
+
+let whisperFilter = null;
+/** Vraća razlog zbog kojeg prepoznavanje govora ne može raditi, ili null ako može. */
+function transcribeProblem() {
+  if (!isAvailable()) return 'ffmpeg is not installed.';
+  if (whisperFilter === null) {
+    const r = spawnSync(cfg.ffmpeg, ['-hide_banner', '-h', 'filter=whisper'], { windowsHide: true });
+    whisperFilter = !r.error && String(r.stdout).includes('whisper AVOptions');
+  }
+  if (!whisperFilter) return 'This ffmpeg build has no speech recognition (the whisper filter). Install a full build, version 8 or newer.';
+  if (!fs.existsSync(cfg.whisperModel)) return `The speech model is missing. Download it to ${cfg.whisperModel} (see the README).`;
+  return null;
+}
+
+/** Sprječava preklapanje titlova i izbacuje prazne redove i oznake poput [BLANK_AUDIO]. */
+function tidyLines(lines) {
+  const out = [];
+  for (const line of [...lines].sort((a, b) => a.start - b.start)) {
+    const text = String(line.text || '').replace(/\s+/g, ' ').trim();
+    if (!text || /^[[(].*[\])]$/.test(text)) continue;
+    const start = Math.max(line.start, out.length ? out[out.length - 1].end : 0);
+    const end = Math.max(line.end, start + 0.2);
+    out.push({ start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100, text });
+  }
+  return out;
+}
+
+/** Prepoznaje engleski govor u videu. Vraća [{start, end, text}] sa vremenima u sekundama. */
+async function transcribe(file, duration, onProgress) {
+  const out = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.json`);
+  const options = [`model=${filterPath(cfg.whisperModel)}`, 'language=en', 'queue=20', `max_len=${CAPTION_CHARS}`, `destination=${filterPath(out)}`, 'format=json'];
+  try {
+    await run(
+      cfg.ffmpeg,
+      ['-hide_banner', '-nostdin', '-v', 'error', '-i', file, '-vn', '-af', `whisper=${options.join(':')}`, '-progress', 'pipe:1', '-nostats', '-f', 'null', '-'],
+      progressParser(duration, onProgress)
+    );
+    const text = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
+    const lines = [];
+    for (const row of text.split(/\r?\n/)) {
+      if (!row.trim()) continue;
+      const item = JSON.parse(row);
+      lines.push({ start: item.start / 1000, end: item.end / 1000, text: item.text });
+    }
+    return tidyLines(lines);
+  } finally {
+    fs.rm(out, { force: true }, () => {});
+  }
+}
+
+const assTime = (t) => {
+  const cs = Math.round(t * 100);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${Math.floor(cs / 360000)}:${pad(Math.floor(cs / 6000) % 60)}:${pad(Math.floor(cs / 100) % 60)}.${pad(cs % 100)}`;
+};
+
+/** Pravi ASS fajl sa titlovima u zadanom stilu za video veličine width×height. */
+function buildAss(lines, style, { width, height }) {
+  const s = { ...DEFAULT_CAPTION_STYLE, ...style };
+  const size = Math.round(height * (CAPTION_SIZES[s.size] || CAPTION_SIZES.medium));
+  const [, r, g, b] = /^#(..)(..)(..)$/.exec(s.color) || [null, 'ff', 'ff', 'ff'];
+  const alignment = { bottom: 2, middle: 5, top: 8 }[s.position] || 2;
+  // Dolje se ostavlja mjesta za naslov i dugmad koje YouTube crta preko Shorta.
+  const marginV = Math.round(height * (s.position === 'top' ? 0.1 : 0.2));
+  const events = lines.map((l) => {
+    const text = (s.upper ? l.text.toUpperCase() : l.text).replace(/[{}]/g, '').replace(/\\/g, '/').replace(/\s+/g, ' ');
+    return `Dialogue: 0,${assTime(l.start)},${assTime(l.end)},Default,,0,0,0,,${text}`;
+  });
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Default,${s.font},${size},&H00${b}${g}${r},&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${Math.round(size * 0.08)},0,${alignment},${Math.round(width * 0.06)},${Math.round(width * 0.06)},${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    ...events,
+    '',
+  ].join('\n');
+}
+
+/** Upisuje titlove (sadržaj ASS fajla) u sliku videa. Zvuk se prenosi bez promjene. */
+async function renderCaptioned({ input, output, subtitles, duration }, onProgress) {
+  const assFile = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.ass`);
+  fs.writeFileSync(assFile, subtitles);
+  try {
+    await run(
+      cfg.ffmpeg,
+      [
+        '-hide_banner', '-nostdin', '-v', 'error', '-y', '-i', input,
+        '-vf', `ass=${filterPath(assFile)}`,
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+        '-c:a', 'copy', '-movflags', '+faststart',
+        '-progress', 'pipe:1', '-nostats', output,
+      ],
+      progressParser(duration, onProgress)
+    );
+  } finally {
+    fs.rm(assFile, { force: true }, () => {});
+  }
+}
+
+module.exports = {
+  LAYOUTS,
+  SHORT_SIZE,
+  CAPTION_FONTS,
+  CAPTION_SIZES,
+  CAPTION_POSITIONS,
+  DEFAULT_CAPTION_STYLE,
+  isAvailable,
+  probe,
+  audioLevels,
+  findMoments,
+  waveform,
+  thumbnail,
+  renderArgs,
+  renderShort,
+  joinArgs,
+  renderJoined,
+  transcribeProblem,
+  transcribe,
+  tidyLines,
+  buildAss,
+  renderCaptioned,
+};

@@ -1,7 +1,7 @@
 'use strict';
 // HTML šabloni. Sve vrijednosti od korisnika prolaze kroz h() (escape).
 const cfg = require('./lib/config');
-const { LAYOUTS } = require('./lib/media');
+const { LAYOUTS, CAPTION_FONTS, DEFAULT_CAPTION_STYLE } = require('./lib/media');
 
 const h = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -127,7 +127,8 @@ function shortTiles(clips, { from = '' } = {}) {
         ${
           c.status === 'ready'
             ? `<a class="button primary" href="/clips/${c.id}/file?download=1">Download</a>
-               <a class="button" href="/videos/new?clip=${c.id}">Add intro and outro</a>`
+               <a class="button" href="/videos/new?clip=${c.id}">Add intro and outro</a>
+               <a class="button" href="/clips/${c.id}/captions">Add captions</a>`
             : ''
         }
         ${
@@ -593,6 +594,94 @@ ${studioPoll(busy && ffmpegOk)}
   );
 }
 
+// ── Titlovi ───────────────────────────────────────────────
+function captionsPage(ctx, { clip, captions, problem }) {
+  const status = captions ? captions.status : 'none';
+  const style = { ...DEFAULT_CAPTION_STYLE, ...(captions ? JSON.parse(captions.style || '{}') : {}) };
+  const select = (name, label, options) =>
+    `<label>${label}<select name="${name}" id="cap-${name}">${options
+      .map(([value, text]) => `<option value="${h(value)}"${style[name] === value ? ' selected' : ''}>${h(text)}</option>`)
+      .join('')}</select></label>`;
+  const generate = (label) =>
+    `<form method="post" action="/clips/${clip.id}/captions/generate"><button class="primary"${problem ? ' disabled' : ''}>${label}</button></form>`;
+
+  let panel;
+  if (status === 'pending' || status === 'transcribing') {
+    panel = `<h2>Captions</h2>
+<p class="muted">Listening to the voice in this Short…</p>${progressBar(captions.progress)}`;
+  } else if (status === 'ready') {
+    const lines = JSON.parse(captions.lines);
+    panel = `<form method="post" action="/clips/${clip.id}/captions" id="cap-form" class="stack">
+  <h2>Style</h2>
+  <div class="cap-style">
+    ${select('font', 'Font', CAPTION_FONTS)}
+    ${select('size', 'Size', [['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']])}
+    ${select('position', 'Position', [['bottom', 'Bottom'], ['middle', 'Middle'], ['top', 'Top']])}
+  </div>
+  <div>
+    <span class="field-label">Color</span>
+    <div class="swatches" role="group" aria-label="Caption color">
+      ${THUMB_COLORS.map(([c, name]) => `<button type="button" class="swatch${c === style.color ? ' is-picked' : ''}" data-cap-color="${c}" style="background:${c}" title="${name}" aria-label="${name}"></button>`).join('')}
+    </div>
+    <input type="hidden" name="color" id="cap-color" value="${h(style.color)}">
+  </div>
+  <label class="check"><input type="checkbox" name="upper" id="cap-upper" value="1"${style.upper ? ' checked' : ''}> Write the captions in capitals</label>
+
+  <h2>Lines</h2>
+  ${
+    lines.length
+      ? `<p class="muted small">Fix any word that was heard wrong. The two numbers are the seconds when a line appears and disappears. Select a line to jump to it in the video.</p>
+  <ol class="cap-lines" id="cap-lines">${lines
+          .map(
+            (l) => `<li>
+      <input type="number" name="start" value="${l.start}" min="0" step="0.05" aria-label="Appears at, in seconds">
+      <input type="number" name="end" value="${l.end}" min="0" step="0.05" aria-label="Disappears at, in seconds">
+      <input name="text" value="${h(l.text)}" maxlength="120" aria-label="Caption text">
+      <button type="button" class="danger-outline" data-cap-remove aria-label="Remove this line" title="Remove this line">×</button>
+    </li>`
+          )
+          .join('')}</ol>`
+      : '<p class="muted">No speech was found in this Short. Captions are made from your voice, not from the sound of the game.</p>'
+  }
+  <div class="cap-actions">
+    <button name="action" value="save">Save changes</button>
+    <button class="primary" name="action" value="render"${lines.length ? '' : ' disabled'}>Create Short with captions</button>
+  </div>
+  <p class="muted small">The captions are drawn into a copy of this Short. The original stays as it is.</p>
+</form>
+<form method="post" action="/clips/${clip.id}/captions/generate" data-confirm="Listen to the Short again? Your changes to the lines will be replaced."><button class="link">Generate the captions again</button></form>`;
+  } else {
+    panel = `<h2>Captions</h2>
+${status === 'failed' ? `<p class="error">${h(captions.error || 'The captions could not be generated.')}</p>` : ''}
+<p>The app listens to the English speech in this Short and writes it out as captions. You can fix the text before it is drawn into the video.</p>
+${problem ? `<div class="notice warn"><strong>Captions are not available yet.</strong> ${h(problem)}</div>` : ''}
+${generate(status === 'failed' ? 'Try again' : 'Generate captions')}`;
+  }
+  const busy = status === 'pending' || status === 'transcribing';
+
+  return layout(
+    ctx,
+    'Captions',
+    `<div class="page-head">
+  <h1>Captions</h1>
+  <a class="button" href="/shorts">Back to Shorts</a>
+</div>
+<div class="cap-layout">
+  <section class="card">
+    <p class="form-source"><strong>${h(clip.title)}</strong></p>
+    <div class="cap-stage" id="cap-stage">
+      <video id="cap-video" src="/clips/${clip.id}/file" controls preload="metadata" playsinline></video>
+      <div class="cap-overlay" id="cap-overlay" aria-hidden="true"></div>
+    </div>
+  </section>
+  <section class="card" id="live-captions" data-live data-rev="${h(status)}" data-poll-key="captions:${clip.id}" data-state="${h(status)}">
+    ${panel}
+    ${studioPoll(busy && !problem)}
+  </section>
+</div>`
+  );
+}
+
 // ── Pravne stranice ───────────────────────────────────────
 function privacyPage(ctx) {
   const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the person who runs this copy of the app';
@@ -666,6 +755,7 @@ module.exports = {
   bumpersPage,
   videoNewPage,
   videoMergePage,
+  captionsPage,
   videosPage,
   privacyPage,
   termsPage,

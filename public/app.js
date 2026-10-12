@@ -600,6 +600,62 @@ if (mergeForm) {
   render();
 }
 
+// ── Titlovi: pregled preko videa i uređivanje redova ──────
+const capVideo = document.getElementById('cap-video');
+if (capVideo) {
+  const overlay = document.getElementById('cap-overlay');
+  const SIZES = { small: 0.038, medium: 0.05, large: 0.064 }; // udio visine videa, kao pri upisivanju u sliku
+  // Desni dio stranice se zamjenjuje kad prepoznavanje završi, pa se polja traže svaki put iznova.
+  const value = (id, fallback) => document.getElementById(id)?.value ?? fallback;
+  const lines = () =>
+    [...document.querySelectorAll('#cap-lines li')].map((li) => {
+      const [start, end, text] = li.querySelectorAll('input');
+      return { start: Number(start.value), end: Number(end.value), text: text.value.trim() };
+    });
+
+  function showCaption() {
+    const t = capVideo.currentTime;
+    const line = lines().find((l) => l.text && t >= l.start && t < l.end);
+    overlay.textContent = line ? (document.getElementById('cap-upper')?.checked ? line.text.toUpperCase() : line.text) : '';
+    const size = capVideo.clientHeight * (SIZES[value('cap-size', 'medium')] || SIZES.medium);
+    overlay.style.fontSize = `${size}px`;
+    overlay.style.fontFamily = `${value('cap-font', 'Impact')}, 'Arial Black', sans-serif`;
+    overlay.style.color = value('cap-color', '#ffffff');
+    overlay.style.webkitTextStroke = `${size * 0.16}px #000`;
+    overlay.dataset.position = value('cap-position', 'bottom');
+  }
+  for (const type of ['timeupdate', 'seeked', 'loadedmetadata']) capVideo.addEventListener(type, showCaption);
+  for (const type of ['input', 'change']) {
+    document.addEventListener(type, (e) => {
+      if (e.target.closest('#cap-form')) showCaption();
+    });
+  }
+  document.addEventListener('live:refresh', showCaption);
+
+  // Ulazak u tekst reda (klikom ili tipkom Tab) premota video na taj red.
+  const jumpToRow = (e) => {
+    const row = e.target.closest?.('#cap-lines li');
+    if (!row || e.target.name !== 'text') return;
+    capVideo.pause();
+    capVideo.currentTime = Number(row.querySelector('input[name="start"]').value) + 0.01;
+  };
+  document.addEventListener('focusin', jumpToRow);
+  document.addEventListener('click', jumpToRow);
+
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (!button) return;
+    if (button.hasAttribute('data-cap-remove')) {
+      button.closest('li').remove();
+      showCaption();
+    } else if (button.dataset.capColor) {
+      document.getElementById('cap-color').value = button.dataset.capColor;
+      for (const s of document.querySelectorAll('[data-cap-color]')) s.classList.toggle('is-picked', s === button);
+      showCaption();
+    }
+  });
+}
+
 // Pregled Shorta dok je miš iznad njega
 document.addEventListener(
   'mouseenter',

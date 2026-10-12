@@ -31,6 +31,9 @@ module.exports = {
   thumbnailsDir: path.join(ROOT, 'data', 'thumbnails'),
   bumpersDir: path.join(ROOT, 'data', 'bumpers'),
   videosDir: path.join(ROOT, 'data', 'videos'),
+  tmpDir: path.join(ROOT, 'data', 'tmp'),
+  // Model za prepoznavanje engleskog govora (whisper.cpp); skida se jednom, vidi README.
+  whisperModel: path.resolve(ROOT, env.WHISPER_MODEL || 'data/models/ggml-small.en.bin'),
   ffmpeg: findTool('ffmpeg', env.FFMPEG_PATH),
   ffprobe: findTool('ffprobe', env.FFPROBE_PATH),
   // Nema prijave, pa se aplikacija javlja samo na ovom računaru.

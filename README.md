@@ -11,6 +11,7 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Pravi thumbnail (JPG 1280×720) od kadra iz snimka, sa tekstom i doradom slike.
 - Dodaje intro i outro na cijeli snimak ili na Short i pravi gotov video.
 - Spaja više videa (snimke, Shorts, intro i outro klipove) u jedan, redom koji zadaš.
+- Pravi engleske titlove iz tvog govora u Shortu i upisuje ih u sliku.
 - Nema prijave: aplikacija je za jednog korisnika i dostupna je samo sa računara na kojem radi.
 
 Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga sam kroz YouTube Studio.
@@ -72,12 +73,31 @@ Gotov video ima veličinu glavnog videa. Klip drugačijeg oblika (npr. vodoravni
 
 Vrijede ista pravila kao kod intra i outra: dijelovi drugačijeg oblika dobijaju crne rubove, a sve se kodira iznova.
 
+## Titlovi (engleski)
+
+Titlovi nastaju prepoznavanjem engleskog govora, lokalno na tvom računaru. Za to treba ffmpeg 8 ili noviji ("full" verzija, kakvu instalira `winget install Gyan.FFmpeg`) i model za prepoznavanje govora, koji se skine jednom (oko 490 MB):
+
+```
+curl -L -o data/models/ggml-small.en.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin
+```
+
+Prije toga napravi folder `data/models`. Za tačnije prepoznavanje možeš skinuti veći model (`ggml-medium.en.bin`) i upisati njegovu putanju u `.env` kao `WHISPER_MODEL`.
+
+1. Na stranici **Shorts** klikni **Add captions** na Shortu u kojem govoriš.
+2. Klikni **Generate captions** i sačekaj da aplikacija presluša Short.
+3. Ispravi pogrešno prepoznate riječi. Dva broja uz svaki red su sekunde kad se titl pojavi i nestane; klik na red premota video na njega, a **×** ga briše.
+4. Izaberi font, veličinu, boju i poziciju. Titl se kao pregled vidi preko videa.
+5. Klikni **Create Short with captions**. Nastaje kopija Shorta sa titlovima u slici, a original ostaje netaknut.
+
+Titlovi nastaju iz govora, ne iz zvuka igre. Prvi titl se ponekad pojavi nešto prije nego što govor počne, pa mu po potrebi pomjeri vrijeme.
+
 ## Gdje su podaci
 
 - `data/app.db` je baza (snimci, Shorts, thumbnailovi, klipovi i gotovi videi).
 - `data/recordings/` su tvoji snimci gameplaya.
 - `data/shorts/` su izrezani Shorts, a `data/thumbnails/` thumbnailovi koje si napravio.
 - `data/bumpers/` su intro i outro klipovi, a `data/videos/` gotovi videi.
+- `data/models/` je model za prepoznavanje govora.
 - `data/thumbs/` su sličice za prikaz u aplikaciji.
 - `.env` sadrži podešavanja.
 
@@ -88,7 +108,7 @@ Folder `data/` i fajl `.env` nisu u gitu. Napravi im rezervnu kopiju ako ti je s
 ```
 src/server.js        rute i HTTP server
 src/views.js         HTML stranice
-src/lib/media.js     ffmpeg: analiza zvuka, prijedlozi trenutaka, rezanje u 9:16 i spajanje dijelova
+src/lib/media.js     ffmpeg: analiza zvuka, prijedlozi trenutaka, rezanje u 9:16, spajanje dijelova i titlovi
 src/lib/studio.js    skeniranje foldera sa snimcima i redovi poslova za analizu, rezanje i spajanje
 src/lib/db.js        SQLite šema (ugrađeni node:sqlite)
 public/              CSS i JavaScript za preglednik

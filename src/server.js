@@ -358,15 +358,82 @@ route(
       : db.prepare('SELECT id, status, progress FROM recordings WHERE user_id=? AND hidden=0').all(ctx.user.id);
     const clips = db.prepare('SELECT id, status, progress FROM clips WHERE user_id=?').all(ctx.user.id);
     const videos = db.prepare('SELECT id, status, progress FROM exports WHERE user_id=?').all(ctx.user.id);
+    const captions = db
+      .prepare('SELECT c.clip_id, c.status, c.progress FROM captions c JOIN clips ON clips.id = c.clip_id WHERE clips.user_id=?')
+      .all(ctx.user.id);
     json(ctx, {
       items: [
         ...recs.map((r) => ({ key: `rec:${r.id}`, status: r.status, progress: r.progress })),
         ...clips.map((c) => ({ key: `clip:${c.id}`, status: c.status, progress: c.progress })),
         ...videos.map((v) => ({ key: `video:${v.id}`, status: v.status, progress: v.progress })),
+        ...captions.map((c) => ({ key: `captions:${c.clip_id}`, status: c.status, progress: c.progress })),
       ],
     });
   }
 );
+
+// ── Rute: titlovi za Shorts ───────────────────────────────
+const MAX_CAPTION_LINES = 600;
+
+route('GET', '/clips/:id/captions', (ctx) => {
+  const clip = userClip(ctx);
+  if (!clip || clip.status !== 'ready') return html(ctx, views.errorPage(ctx, 404, 'This Short does not exist or is not ready yet.'), 404);
+  const captions = db.prepare('SELECT * FROM captions WHERE clip_id=?').get(clip.id) || null;
+  html(ctx, views.captionsPage(ctx, { clip, captions, problem: media.transcribeProblem() }));
+});
+
+route('POST', '/clips/:id/captions/generate', (ctx) => {
+  const clip = userClip(ctx);
+  if (!clip || clip.status !== 'ready') return redirect(ctx, '/shorts');
+  const problem = media.transcribeProblem();
+  if (problem) flash(ctx, 'bad', problem);
+  else studio.requestCaptions(clip.id);
+  redirect(ctx, `/clips/${clip.id}/captions`);
+});
+
+// Sprema ispravljene titlove i stil; uz action=render pravi i novi Short sa titlovima u slici.
+route('POST', '/clips/:id/captions', async (ctx) => {
+  const clip = userClip(ctx);
+  if (!clip || clip.status !== 'ready') return redirect(ctx, '/shorts');
+  const back = `/clips/${clip.id}/captions`;
+  const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, back));
+  const captions = db.prepare('SELECT * FROM captions WHERE clip_id=?').get(clip.id);
+  if (!captions || captions.status !== 'ready') return fail('Generate the captions first.');
+
+  const form = await readForm(ctx.req);
+  const starts = form.getAll('start');
+  const ends = form.getAll('end');
+  const texts = form.getAll('text');
+  if (starts.length !== texts.length || ends.length !== texts.length || texts.length > MAX_CAPTION_LINES) return fail('The captions could not be read. Reload the page and try again.');
+  const length = clip.end_s - clip.start_s;
+  const lines = [];
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i].replace(/\s+/g, ' ').trim().slice(0, 120);
+    if (!text) continue; // prazan red znači da je titl obrisan
+    const start = Number(starts[i]);
+    const end = Number(ends[i]);
+    if (!(start >= 0) || !(end > start) || end > length + 0.5) return fail(`Check the times of “${text}”: the end must be after the start and inside the video.`);
+    lines.push({ start, end, text });
+  }
+  const style = {
+    font: media.CAPTION_FONTS.some(([f]) => f === form.get('font')) ? form.get('font') : media.DEFAULT_CAPTION_STYLE.font,
+    size: media.CAPTION_SIZES[form.get('size')] ? form.get('size') : media.DEFAULT_CAPTION_STYLE.size,
+    color: /^#[0-9a-f]{6}$/i.test(form.get('color') || '') ? form.get('color') : media.DEFAULT_CAPTION_STYLE.color,
+    position: media.CAPTION_POSITIONS.includes(form.get('position')) ? form.get('position') : media.DEFAULT_CAPTION_STYLE.position,
+    upper: form.get('upper') === '1',
+  };
+  const tidy = media.tidyLines(lines);
+  db.prepare('UPDATE captions SET lines=?, style=? WHERE id=?').run(JSON.stringify(tidy), JSON.stringify(style), captions.id);
+
+  if (form.get('action') !== 'render') {
+    flash(ctx, 'ok', 'The captions have been saved.');
+    return redirect(ctx, back);
+  }
+  if (!tidy.length) return fail('There are no captions to add. Keep at least one line.');
+  studio.createCaptionedClip(clip, tidy, style);
+  flash(ctx, 'ok', `A copy of “${clip.title}” with captions is being created.`);
+  redirect(ctx, '/shorts');
+});
 
 // ── Rute: thumbnailovi ────────────────────────────────────
 const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;

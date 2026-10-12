@@ -11,7 +11,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const cfg = require('./config');
 
-for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir, cfg.thumbnailsDir, cfg.bumpersDir, cfg.videosDir]) {
+for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir, cfg.thumbnailsDir, cfg.bumpersDir, cfg.videosDir, cfg.tmpDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 const db = new DatabaseSync(path.join(cfg.dataDir, 'app.db'));
@@ -113,6 +113,18 @@ CREATE TABLE IF NOT EXISTS exports (
   error      TEXT,
   created_at TEXT NOT NULL
 );
+
+-- Titlovi prepoznati iz govora u Shortu
+CREATE TABLE IF NOT EXISTS captions (
+  id         INTEGER PRIMARY KEY,
+  clip_id    INTEGER NOT NULL UNIQUE REFERENCES clips(id) ON DELETE CASCADE,
+  status     TEXT NOT NULL DEFAULT 'pending', -- pending | transcribing | ready | failed
+  progress   INTEGER NOT NULL DEFAULT 0,
+  error      TEXT,
+  lines      TEXT NOT NULL DEFAULT '[]',      -- JSON: [{start, end, text}], vremena u sekundama
+  style      TEXT NOT NULL DEFAULT '{}',      -- JSON: font, size, color, position, upper
+  created_at TEXT NOT NULL
+);
 `);
 
 // Kolone dodane nakon što je tabela već mogla biti napravljena.
@@ -121,6 +133,9 @@ function addColumn(table, column, type) {
   if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 addColumn('recordings', 'waveform', 'TEXT');
+// Short sa titlovima: iz kojeg Shorta je nastao i sadržaj ASS fajla koji se upisuje u sliku.
+addColumn('clips', 'source_clip_id', 'INTEGER');
+addColumn('clips', 'subtitles', 'TEXT');
 
 db.now = () => new Date().toISOString();
 

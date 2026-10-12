@@ -239,6 +239,23 @@ input[type=range] { padding: 0; border: 0; background: none; accent-color: var(-
 .merge-list li::before { counter-increment: part; content: counter(part); flex: none; width: 1.6rem; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .merge-list button { padding: 0.3rem 0.6rem; }
 
+/* Titlovi */
+.cap-layout { display: grid; grid-template-columns: minmax(240px, 340px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 760px) { .cap-layout { grid-template-columns: minmax(0, 1fr); } }
+.cap-stage { position: relative; margin-top: 0.75rem; overflow: hidden; border-radius: 8px; background: #000; }
+.cap-stage video { display: block; width: 100%; }
+.cap-overlay { position: absolute; left: 6%; right: 6%; line-height: 1.15; text-align: center; paint-order: stroke fill; overflow-wrap: anywhere; pointer-events: none; }
+.cap-overlay[data-position="bottom"] { bottom: 20%; }
+.cap-overlay[data-position="middle"] { top: 50%; transform: translateY(-50%); }
+.cap-overlay[data-position="top"] { top: 10%; }
+.cap-style { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+.cap-style label { margin: 0; }
+#cap-lines { display: grid; gap: 0.35rem; max-height: 52vh; margin: 0; padding: 0 0.25rem 0 0; overflow: auto; list-style: none; }
+#cap-lines li { display: grid; grid-template-columns: 5rem 5rem minmax(0, 1fr) auto; gap: 0.35rem; align-items: center; }
+#cap-lines input { margin-top: 0; padding: 0.4rem 0.5rem; font-variant-numeric: tabular-nums; }
+#cap-lines button { padding: 0.3rem 0.65rem; }
+.cap-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
 .prose { max-width: 760px; margin: 0 auto; }
 .prose h2 { margin-top: 1.6rem; }
 .prose li { margin-bottom: 0.35rem; }

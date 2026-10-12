@@ -59,6 +59,7 @@ function start() {
   // prije nego što je postojala vremenska traka analiziraju se ponovo.
   db.prepare("UPDATE recordings SET status='pending', progress=0 WHERE status='analyzing' OR (status='ready' AND waveform IS NULL)").run();
   db.prepare("UPDATE clips SET status='pending', progress=0 WHERE status='rendering'").run();
+  db.prepare("UPDATE captions SET status='pending', progress=0 WHERE status='transcribing'").run();
   tick();
   db.prepare("UPDATE exports SET status='pending', progress=0 WHERE status='rendering'").run();
   tickExports();
@@ -68,10 +69,11 @@ function tick() {
   if (busy || !media.isAvailable()) return;
   // Shorts imaju prednost: korisnik ih čeka, a analiza novih snimaka može kasnije.
   const clip = db.prepare("SELECT id FROM clips WHERE status='pending' ORDER BY id LIMIT 1").get();
-  const rec = clip ? null : db.prepare("SELECT id FROM recordings WHERE status='pending' AND hidden=0 ORDER BY id LIMIT 1").get();
-  if (!clip && !rec) return;
+  const cap = clip ? null : db.prepare("SELECT id FROM captions WHERE status='pending' ORDER BY id LIMIT 1").get();
+  const rec = clip || cap ? null : db.prepare("SELECT id FROM recordings WHERE status='pending' AND hidden=0 ORDER BY id LIMIT 1").get();
+  if (!clip && !cap && !rec) return;
   busy = true;
-  (clip ? renderClip(clip.id) : analyze(rec.id))
+  (clip ? renderClip(clip.id) : cap ? transcribeClip(cap.id) : analyze(rec.id))
     .catch((e) => console.error('[studio] unexpected error', e))
     .finally(() => {
       busy = false;
@@ -120,16 +122,20 @@ async function analyze(id) {
 
 async function renderClip(id) {
   const clip = db.prepare('SELECT * FROM clips WHERE id=?').get(id);
-  const rec = clip.recording_id ? db.prepare('SELECT path FROM recordings WHERE id=?').get(clip.recording_id) : null;
   const fail = (msg) => db.prepare("UPDATE clips SET status='failed', error=? WHERE id=?").run(msg, id);
-  if (!rec || !fs.existsSync(rec.path)) return fail('The recording no longer exists on disk.');
+  // Short sa titlovima nastaje iz već izrezanog Shorta, a običan iz snimka.
+  const source = clip.subtitles
+    ? db.prepare('SELECT path FROM clips WHERE id=?').get(clip.source_clip_id)
+    : db.prepare('SELECT path FROM recordings WHERE id=?').get(clip.recording_id);
+  if (!source || !fs.existsSync(source.path)) {
+    return fail(clip.subtitles ? 'The original Short no longer exists on disk.' : 'The recording no longer exists on disk.');
+  }
   db.prepare("UPDATE clips SET status='rendering', progress=0, error=NULL WHERE id=?").run(id);
   try {
-    await media.renderShort(
-      { input: rec.path, output: clip.path, start: clip.start_s, duration: clip.end_s - clip.start_s, layout: clip.layout },
-      progressSetter('clips', id)
-    );
     const length = clip.end_s - clip.start_s;
+    const onProgress = progressSetter('clips', id);
+    if (clip.subtitles) await media.renderCaptioned({ input: source.path, output: clip.path, subtitles: clip.subtitles, duration: length }, onProgress);
+    else await media.renderShort({ input: source.path, output: clip.path, start: clip.start_s, duration: length, layout: clip.layout }, onProgress);
     await media.thumbnail(clip.path, thumbPath('clip', id), Math.min(1, length / 2), 360).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
     db.prepare("UPDATE clips SET status='ready', progress=100, size=? WHERE id=?").run(fs.statSync(clip.path).size, id);
     console.log(`[studio] ✔ Short "${clip.title}"`);
@@ -228,4 +234,57 @@ async function renderExport(id, signal) {
   }
 }
 
-module.exports = { MIN_CLIP, MAX_CLIP, thumbPath, scan, createClip, addBumper, createExport, cancelExport, start, tick };
+// ── Titlovi ───────────────────────────────────────────────
+/** Stavlja prepoznavanje govora za Short u red. Postojeći titlovi tog Shorta se zamjenjuju. */
+function requestCaptions(clipId) {
+  db.prepare(
+    `INSERT INTO captions (clip_id, created_at) VALUES (?, ?)
+     ON CONFLICT(clip_id) DO UPDATE SET status='pending', progress=0, error=NULL, lines='[]'`
+  ).run(clipId, db.now());
+  tick();
+}
+
+async function transcribeClip(id) {
+  const cap = db.prepare('SELECT * FROM captions WHERE id=?').get(id);
+  const clip = db.prepare('SELECT * FROM clips WHERE id=?').get(cap.clip_id);
+  const fail = (msg) => db.prepare("UPDATE captions SET status='failed', error=? WHERE id=?").run(msg, id);
+  if (!clip || !fs.existsSync(clip.path)) return fail('The Short no longer exists on disk.');
+  const problem = media.transcribeProblem();
+  if (problem) return fail(problem);
+  db.prepare("UPDATE captions SET status='transcribing', progress=0, error=NULL WHERE id=?").run(id);
+  try {
+    const lines = await media.transcribe(clip.path, clip.end_s - clip.start_s, progressSetter('captions', id));
+    db.prepare("UPDATE captions SET status='ready', progress=100, lines=? WHERE id=?").run(JSON.stringify(lines), id);
+    console.log(`[studio] ✔ captions for "${clip.title}" (${lines.length} lines)`);
+  } catch (err) {
+    console.warn(`[studio] ✘ captions for "${clip.title}": ${err.message}`);
+    fail(err.message);
+  }
+}
+
+/** Pravi novi Short: kopiju zadanog sa titlovima upisanim u sliku. */
+function createCaptionedClip(clip, lines, style) {
+  const subtitles = media.buildAss(lines, style, media.SHORT_SIZE);
+  const r = db
+    .prepare(
+      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, source_clip_id, subtitles, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      clip.user_id,
+      clip.recording_id,
+      clip.recording_name,
+      `${clip.title.slice(0, 89)} (captions)`,
+      clip.start_s,
+      clip.end_s,
+      clip.layout,
+      path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`),
+      clip.id,
+      subtitles,
+      db.now()
+    );
+  tick();
+  return Number(r.lastInsertRowid);
+}
+
+module.exports = { MIN_CLIP, MAX_CLIP, thumbPath, scan, createClip, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, start, tick };
