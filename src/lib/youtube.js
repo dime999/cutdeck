@@ -83,7 +83,7 @@ async function exchangeCode(code) {
 /** Vraća {tokens, changed}. Osvježava access token ako ističe za manje od 2 minute. */
 async function ensureFresh(tokens) {
   if (tokens.access_token && tokens.expires_at - 120000 > Date.now()) return { tokens, changed: false };
-  if (!tokens.refresh_token) throw new ApiError('Nema refresh tokena.', { reconnect: true });
+  if (!tokens.refresh_token) throw new ApiError('No refresh token.', { reconnect: true });
   const data = await tokenRequest({ grant_type: 'refresh_token', refresh_token: tokens.refresh_token });
   return { tokens: normalizeTokens(data, tokens), changed: true };
 }
@@ -158,7 +158,7 @@ async function startUpload(accessToken, video, size) {
   });
   if (!r.ok) throw await apiError(r);
   const location = r.headers.get('location');
-  if (!location) throw new ApiError('YouTube nije vratio adresu za upload.', { status: 500 });
+  if (!location) throw new ApiError('YouTube did not return an upload URL.', { status: 500 });
   return location;
 }
 
@@ -209,27 +209,27 @@ async function uploadChunks(uploadUrl, filePath, size, offset, getToken, onProgr
     }
     const st = await queryStatus(uploadUrl, size, await getToken());
     if (st.done) return st.video;
-    throw new ApiError('Upload nije potvrđen od YouTubea.', { status: 500 });
+    throw new ApiError('YouTube did not confirm the upload.', { status: 500 });
   } finally {
     await fh.close();
   }
 }
 
 const CATEGORIES = [
-  ['22', 'Ljudi i blogovi'],
-  ['24', 'Zabava'],
-  ['23', 'Komedija'],
-  ['10', 'Muzika'],
-  ['20', 'Igrice'],
-  ['17', 'Sport'],
-  ['26', 'Kako da / stil'],
-  ['27', 'Obrazovanje'],
-  ['28', 'Nauka i tehnologija'],
-  ['1', 'Film i animacija'],
-  ['2', 'Automobili'],
-  ['15', 'Ljubimci i životinje'],
-  ['19', 'Putovanja i događaji'],
-  ['25', 'Vijesti i politika'],
+  ['22', 'People & Blogs'],
+  ['24', 'Entertainment'],
+  ['23', 'Comedy'],
+  ['10', 'Music'],
+  ['20', 'Gaming'],
+  ['17', 'Sports'],
+  ['26', 'Howto & Style'],
+  ['27', 'Education'],
+  ['28', 'Science & Technology'],
+  ['1', 'Film & Animation'],
+  ['2', 'Autos & Vehicles'],
+  ['15', 'Pets & Animals'],
+  ['19', 'Travel & Events'],
+  ['25', 'News & Politics'],
 ];
 
 module.exports = {

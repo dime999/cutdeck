@@ -2,7 +2,7 @@
   "name": "multipost",
   "version": "0.1.0",
   "private": true,
-  "description": "Lokalna aplikacija za objavu jednog videa na više YouTube kanala odjednom.",
+  "description": "Local app for publishing one video to several YouTube channels at once.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

@@ -34,7 +34,7 @@ function tick() {
     db.prepare("UPDATE jobs SET status='uploading', attempts=attempts+1, updated_at=? WHERE id=?").run(now, job.id);
     running++;
     runJob(job.id)
-      .catch((e) => console.error('[worker] neočekivana greška', e))
+      .catch((e) => console.error('[worker] unexpected error', e))
       .finally(() => {
         running--;
         setImmediate(tick);
@@ -57,9 +57,9 @@ async function runJob(jobId) {
   const video = db.prepare('SELECT * FROM videos WHERE id=?').get(job.video_id);
   const account = job.account_id ? db.prepare('SELECT * FROM accounts WHERE id=?').get(job.account_id) : null;
 
-  if (!account) return fail(job.id, 'Kanal je odspojen iz aplikacije.');
-  if (account.status !== 'active') return fail(job.id, 'Kanal treba ponovo povezati (stranica „Kanali“).');
-  if (video.file_deleted || !fs.existsSync(video.path)) return fail(job.id, 'Video fajl više ne postoji na disku.');
+  if (!account) return fail(job.id, 'The channel was disconnected from the app.');
+  if (account.status !== 'active') return fail(job.id, 'The channel needs reconnecting (“Channels” page).');
+  if (video.file_deleted || !fs.existsSync(video.path)) return fail(job.id, 'The video file no longer exists on disk.');
 
   let tokens = JSON.parse(decrypt(account.tokens_enc));
   const saveTokens = () =>
@@ -126,11 +126,11 @@ async function runJob(jobId) {
 
 function handleError(jobId, account, err, invalidateToken) {
   const { attempts } = db.prepare('SELECT attempts FROM jobs WHERE id=?').get(jobId);
-  console.warn(`[worker] ✘ posao #${jobId} (${account.name}): ${err.reason || ''} ${err.message}`);
+  console.warn(`[worker] ✘ job #${jobId} (${account.name}): ${err.reason || ''} ${err.message}`);
 
   if (err.reconnect) {
     db.prepare("UPDATE accounts SET status='reconnect' WHERE id=?").run(account.id);
-    return fail(jobId, 'Pristup kanalu je istekao ili je opozvan. Ponovo poveži kanal pa klikni „Pokušaj ponovo“.');
+    return fail(jobId, 'Access to the channel has expired or was revoked. Reconnect the channel, then click “Retry”.');
   }
 
   const reason = err.reason || '';
@@ -139,7 +139,7 @@ function handleError(jobId, account, err, invalidateToken) {
       status: 'pending',
       attempts: attempts - 1,
       next_attempt_at: nextPacificMidnight(),
-      error: 'Dnevna API kvota je potrošena. Upload se automatski nastavlja nakon ponoći po pacifičkom vremenu (09:00 kod nas).',
+      error: 'The daily API quota is used up. The upload resumes automatically after midnight Pacific Time.',
     });
   }
   if (reason === 'uploadLimitExceeded') {
@@ -147,7 +147,7 @@ function handleError(jobId, account, err, invalidateToken) {
       status: 'pending',
       attempts: attempts - 1,
       next_attempt_at: inMinutes(12 * 60),
-      error: 'Ovaj kanal je dostigao YouTube dnevni limit uploada. Novi pokušaj za 12 sati.',
+      error: 'This channel has reached the YouTube daily upload limit. Next attempt in 12 hours.',
     });
   }
   if (['rateLimitExceeded', 'userRateLimitExceeded'].includes(reason) || err.status === 429) {
@@ -155,7 +155,7 @@ function handleError(jobId, account, err, invalidateToken) {
       status: 'pending',
       attempts: attempts - 1,
       next_attempt_at: inMinutes(15),
-      error: 'YouTube traži da usporimo. Novi pokušaj za 15 minuta.',
+      error: 'YouTube is asking us to slow down. Next attempt in 15 minutes.',
     });
   }
   if (err.status === 401) invalidateToken();
@@ -167,26 +167,26 @@ function handleError(jobId, account, err, invalidateToken) {
   setJob(jobId, {
     status: 'pending',
     next_attempt_at: inMinutes(wait),
-    error: `Pokušaj ${attempts}/${MAX_ATTEMPTS} nije uspio (${humanize(err)}). Novi pokušaj za ${wait} min.`,
+    error: `Attempt ${attempts}/${MAX_ATTEMPTS} failed (${humanize(err)}). Next attempt in ${wait} min.`,
   });
 }
 
 function humanize(err) {
   const map = {
-    youtubeSignupRequired: 'Ovaj Google nalog nema YouTube kanal.',
-    invalidTitle: 'YouTube je odbio naslov.',
-    invalidDescription: 'YouTube je odbio opis.',
-    invalidTags: 'YouTube je odbio tagove.',
-    invalidCategoryId: 'Kategorija nije dostupna za ovaj kanal.',
-    invalidPublishAt: 'Vrijeme zakazane objave nije ispravno.',
-    invalidVideoMetadata: 'Podaci o videu nisu ispravni.',
-    mediaBodyRequired: 'Video fajl nije poslan.',
-    forbidden: 'YouTube je odbio zahtjev (nema dozvole za ovaj kanal).',
-    insufficientPermissions: 'Kanal nije dao dozvolu za upload. Ponovo ga poveži i označi sve dozvole.',
+    youtubeSignupRequired: 'This Google account has no YouTube channel.',
+    invalidTitle: 'YouTube rejected the title.',
+    invalidDescription: 'YouTube rejected the description.',
+    invalidTags: 'YouTube rejected the tags.',
+    invalidCategoryId: 'The category is not available for this channel.',
+    invalidPublishAt: 'The scheduled time is not valid.',
+    invalidVideoMetadata: 'The video details are not valid.',
+    mediaBodyRequired: 'The video file was not sent.',
+    forbidden: 'YouTube rejected the request (no permission for this channel).',
+    insufficientPermissions: 'The channel did not grant the upload permission. Reconnect it and tick all permissions.',
   };
   if (map[err.reason]) return map[err.reason];
-  if (err instanceof TypeError) return 'Nema veze sa internetom ili je veza prekinuta.';
-  return err.message || 'Nepoznata greška.';
+  if (err instanceof TypeError) return 'No internet connection, or the connection was interrupted.';
+  return err.message || 'Unknown error.';
 }
 
 function inMinutes(min) {

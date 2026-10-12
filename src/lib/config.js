@@ -9,7 +9,7 @@ const envPath = process.env.MULTIPOST_ENV || path.join(ROOT, '.env');
 // Prvo pokretanje: napravi .env iz primjera i generiši tajne ključeve.
 if (!fs.existsSync(envPath)) {
   fs.copyFileSync(path.join(ROOT, '.env.example'), envPath);
-  console.log('Napravljen .env fajl iz .env.example');
+  console.log('Created .env from .env.example');
 }
 let text = fs.readFileSync(envPath, 'utf8');
 let changed = false;
@@ -22,13 +22,13 @@ for (const key of ['SESSION_SECRET', 'ENCRYPTION_KEY']) {
 }
 if (changed) {
   fs.writeFileSync(envPath, text);
-  console.log('Generisani SESSION_SECRET i ENCRYPTION_KEY u .env');
+  console.log('Generated SESSION_SECRET and ENCRYPTION_KEY in .env');
 }
 process.loadEnvFile(envPath);
 
 const env = process.env;
 if (!/^[0-9a-f]{64}$/i.test(env.ENCRYPTION_KEY || '')) {
-  console.error('ENCRYPTION_KEY u .env mora imati tačno 64 heksadecimalna znaka.');
+  console.error('ENCRYPTION_KEY in .env must be exactly 64 hexadecimal characters.');
   process.exit(1);
 }
 

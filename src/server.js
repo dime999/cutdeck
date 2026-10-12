@@ -67,7 +67,7 @@ async function readForm(req, limit = 1024 * 1024) {
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limit) throw Object.assign(new Error('Zahtjev je prevelik.'), { status: 413 });
+    if (size > limit) throw Object.assign(new Error('Request is too large.'), { status: 413 });
     chunks.push(chunk);
   }
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
@@ -89,7 +89,8 @@ const STATIC_DIR = path.join(cfg.root, 'public');
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' };
 function serveStatic(req, res, pathname) {
   const file = path.join(STATIC_DIR, path.normalize(pathname.replace(/^\/static\//, '')));
-  if (!file.startsWith(STATIC_DIR) || !fs.existsSync(file)) {
+  const stat = file.startsWith(STATIC_DIR + path.sep) ? fs.statSync(file, { throwIfNoEntry: false }) : null;
+  if (!stat || !stat.isFile()) {
     res.writeHead(404).end();
     return;
   }
@@ -110,7 +111,7 @@ async function handle(req, res) {
   const ctx = { req, res, url, path: url.pathname, query: url.searchParams, session, user, flash: flashMsg, params: {} };
 
   if (['POST', 'PUT', 'DELETE'].includes(req.method) && !sameOrigin(req)) {
-    return html(ctx, views.errorPage(ctx, 403, 'Zahtjev nije došao sa ove stranice.'), 403);
+    return html(ctx, views.errorPage(ctx, 403, 'The request did not come from this site.'), 403);
   }
 
   const method = req.method === 'HEAD' ? 'GET' : req.method;
@@ -120,12 +121,12 @@ async function handle(req, res) {
     if (!m) continue;
     r.keys.forEach((k, i) => (ctx.params[k] = decodeURIComponent(m[i + 1])));
     if (r.auth && !user) {
-      if (url.pathname.startsWith('/api/')) return json(ctx, { error: 'Prijava je istekla. Osvježi stranicu.' }, 401);
+      if (url.pathname.startsWith('/api/')) return json(ctx, { error: 'Your session has expired. Refresh the page.' }, 401);
       return redirect(ctx, '/login');
     }
     return r.handler(ctx);
   }
-  html(ctx, views.errorPage(ctx, 404, 'Ova stranica ne postoji.'), 404);
+  html(ctx, views.errorPage(ctx, 404, 'This page does not exist.'), 404);
 }
 
 // ── Rute: prijava ─────────────────────────────────────────
@@ -140,14 +141,14 @@ route('POST', '/login', async (ctx) => {
   const ip = ctx.req.socket.remoteAddress;
   const a = loginAttempts.get(ip) || { n: 0, until: 0 };
   if (a.until > Date.now()) {
-    return html(ctx, views.loginPage(ctx, { email, error: 'Previše pokušaja. Sačekaj minutu pa probaj ponovo.' }), 429);
+    return html(ctx, views.loginPage(ctx, { email, error: 'Too many attempts. Wait a minute and try again.' }), 429);
   }
   const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
   if (!u || !sec.verifyPassword(form.get('password') || '', u.password_hash)) {
     a.n += 1;
     if (a.n >= 5) Object.assign(a, { n: 0, until: Date.now() + 60000 });
     loginAttempts.set(ip, a);
-    return html(ctx, views.loginPage(ctx, { email, error: 'Pogrešan email ili lozinka.' }), 401);
+    return html(ctx, views.loginPage(ctx, { email, error: 'Wrong email or password.' }), 401);
   }
   loginAttempts.delete(ip);
   ctx.session = { uid: u.id };
@@ -163,7 +164,7 @@ route('GET', '/register', (ctx) => {
   if (ctx.user) return redirect(ctx, '/dashboard');
   const needsInvite = registrationNeedsInvite();
   if (needsInvite && !cfg.inviteCode) {
-    return html(ctx, views.errorPage(ctx, 403, 'Registracija je zatvorena. Administrator treba postaviti INVITE_CODE u .env fajlu.'), 403);
+    return html(ctx, views.errorPage(ctx, 403, 'Sign-up is closed. The administrator needs to set INVITE_CODE in the .env file.'), 403);
   }
   html(ctx, views.registerPage(ctx, { needsInvite }));
 });
@@ -175,17 +176,17 @@ route('POST', '/register', async (ctx) => {
   const needsInvite = registrationNeedsInvite();
   const fail = (error) => html(ctx, views.registerPage(ctx, { values, error, needsInvite }), 400);
 
-  if (needsInvite && (!cfg.inviteCode || values.invite !== cfg.inviteCode)) return fail('Pozivni kod nije ispravan.');
-  if (!values.name) return fail('Upiši ime.');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) return fail('Email nije ispravan.');
-  if (password.length < 8) return fail('Lozinka mora imati najmanje 8 znakova.');
-  if (db.prepare('SELECT 1 FROM users WHERE email=?').get(values.email)) return fail('Nalog sa ovim emailom već postoji.');
+  if (needsInvite && (!cfg.inviteCode || values.invite !== cfg.inviteCode)) return fail('The invite code is not valid.');
+  if (!values.name) return fail('Enter your name.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) return fail('The email address is not valid.');
+  if (password.length < 8) return fail('The password must be at least 8 characters long.');
+  if (db.prepare('SELECT 1 FROM users WHERE email=?').get(values.email)) return fail('An account with this email already exists.');
 
   const r = db
     .prepare('INSERT INTO users (email, name, password_hash, created_at) VALUES (?, ?, ?, ?)')
     .run(values.email, values.name.slice(0, 60), sec.hashPassword(password), db.now());
   ctx.session = { uid: Number(r.lastInsertRowid) };
-  flash(ctx, 'ok', `Dobro došao, ${values.name}! Prvo poveži svoje YouTube kanale.`);
+  flash(ctx, 'ok', `Welcome, ${values.name}! Start by connecting your YouTube channels.`);
   redirect(ctx, '/accounts');
 });
 
@@ -210,7 +211,7 @@ route(
   '/oauth/youtube/start',
   (ctx) => {
     if (!yt.isConfigured()) {
-      flash(ctx, 'bad', 'Google pristup nije podešen u .env fajlu.');
+      flash(ctx, 'bad', 'Google access is not configured in the .env file.');
       return redirect(ctx, '/accounts');
     }
     const state = sec.randomId();
@@ -229,11 +230,11 @@ route(
     delete session.oauthState;
 
     if (query.get('error')) {
-      flash(ctx, 'bad', query.get('error') === 'access_denied' ? 'Povezivanje je otkazano.' : `Google greška: ${query.get('error')}`);
+      flash(ctx, 'bad', query.get('error') === 'access_denied' ? 'Connecting was cancelled.' : `Google error: ${query.get('error')}`);
       return redirect(ctx, '/accounts');
     }
     if (!expected || query.get('state') !== expected) {
-      flash(ctx, 'bad', 'Sesija povezivanja je istekla. Pokušaj ponovo.');
+      flash(ctx, 'bad', 'The connection session has expired. Try again.');
       return redirect(ctx, '/accounts');
     }
 
@@ -241,13 +242,13 @@ route(
       const tokens = await yt.exchangeCode(query.get('code') || '');
       if (!tokens.scope.includes('youtube.upload')) {
         await yt.revoke(tokens);
-        flash(ctx, 'bad', 'Bez dozvole za upload aplikacija ne može objavljivati. Poveži ponovo i označi sve dozvole.');
+        flash(ctx, 'bad', 'Without the upload permission the app cannot publish. Connect again and tick all permissions.');
         return redirect(ctx, '/accounts');
       }
       const channel = await yt.getMyChannel(tokens.access_token);
       if (!channel) {
         await yt.revoke(tokens);
-        flash(ctx, 'bad', 'Ovaj Google nalog nema YouTube kanal. Napravi kanal na youtube.com pa pokušaj ponovo.');
+        flash(ctx, 'bad', 'This Google account has no YouTube channel. Create a channel on youtube.com and try again.');
         return redirect(ctx, '/accounts');
       }
 
@@ -264,16 +265,16 @@ route(
           sec.encrypt(JSON.stringify(tokens)),
           existing.id
         );
-        flash(ctx, 'ok', `Kanal „${channel.title}“ je ponovo povezan.`);
+        flash(ctx, 'ok', `Channel “${channel.title}” has been reconnected.`);
       } else {
         db.prepare(
           "INSERT INTO accounts (user_id, platform, external_id, name, thumbnail, tokens_enc, status, created_at) VALUES (?, 'youtube', ?, ?, ?, ?, 'active', ?)"
         ).run(ctx.user.id, channel.id, channel.title, channel.thumbnail, sec.encrypt(JSON.stringify(tokens)), db.now());
-        flash(ctx, 'ok', `Kanal „${channel.title}“ je povezan.`);
+        flash(ctx, 'ok', `Channel “${channel.title}” has been connected.`);
       }
     } catch (err) {
       console.error('[oauth]', err);
-      flash(ctx, 'bad', `Povezivanje nije uspjelo: ${err.message}`);
+      flash(ctx, 'bad', `Connecting failed: ${err.message}`);
     }
     redirect(ctx, '/accounts');
   },
@@ -288,17 +289,17 @@ route(
     if (!acc) return redirect(ctx, '/accounts');
     const uploading = db.prepare("SELECT 1 FROM jobs WHERE account_id=? AND status='uploading'").get(acc.id);
     if (uploading) {
-      flash(ctx, 'bad', 'Na ovaj kanal se trenutno šalje video. Sačekaj da završi pa ga odspoji.');
+      flash(ctx, 'bad', 'A video is being uploaded to this channel right now. Wait for it to finish, then disconnect.');
       return redirect(ctx, '/accounts');
     }
     try {
       await yt.revoke(JSON.parse(sec.decrypt(acc.tokens_enc)));
     } catch {}
     db.transaction(() => {
-      db.prepare("UPDATE jobs SET status='failed', error='Kanal je odspojen.' WHERE account_id=? AND status='pending'").run(acc.id);
+      db.prepare("UPDATE jobs SET status='failed', error='The channel was disconnected.' WHERE account_id=? AND status='pending'").run(acc.id);
       db.prepare('DELETE FROM accounts WHERE id=?').run(acc.id);
     });
-    flash(ctx, 'ok', `Kanal „${acc.name}“ je odspojen i pristup je opozvan.`);
+    flash(ctx, 'ok', `Channel “${acc.name}” has been disconnected and access revoked.`);
     redirect(ctx, '/accounts');
   },
   { auth: true }
@@ -327,9 +328,9 @@ route(
     const mime = String(req.headers['content-type'] || 'application/octet-stream').split(';')[0];
     const size = Number(req.headers['content-length'] || 0);
 
-    if (!mime.startsWith('video/') && !VIDEO_EXT.test(name)) return json(ctx, { error: 'Fajl nije video.' }, 400);
-    if (!size) return json(ctx, { error: 'Fajl je prazan.' }, 400);
-    if (size > cfg.maxUploadBytes) return json(ctx, { error: 'Fajl je veći od 20 GB.' }, 413);
+    if (!mime.startsWith('video/') && !VIDEO_EXT.test(name)) return json(ctx, { error: 'The file is not a video.' }, 400);
+    if (!size) return json(ctx, { error: 'The file is empty.' }, 400);
+    if (size > cfg.maxUploadBytes) return json(ctx, { error: 'The file is larger than 20 GB.' }, 413);
 
     const id = sec.randomId();
     const ext = (path.extname(name).match(/^\.[a-z0-9]{1,5}$/i) || [''])[0];
@@ -338,12 +339,12 @@ route(
       await pipeline(req, fs.createWriteStream(dest));
     } catch (err) {
       fs.rm(dest, { force: true }, () => {});
-      return json(ctx, { error: 'Prijenos fajla je prekinut.' }, 400);
+      return json(ctx, { error: 'The file transfer was interrupted.' }, 400);
     }
     const written = fs.statSync(dest).size;
     if (written !== size) {
       fs.rm(dest, { force: true }, () => {});
-      return json(ctx, { error: 'Fajl nije stigao cijeli. Pokušaj ponovo.' }, 400);
+      return json(ctx, { error: 'The file did not arrive completely. Try again.' }, 400);
     }
     db.prepare('INSERT INTO uploads (id, user_id, path, original_name, mime, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       id,
@@ -368,24 +369,24 @@ function validateVideo(form, userId) {
   const category = form.get('category') || '22';
   const publishAt = form.get('publish_at') || '';
 
-  if (!title) errors.push('Upiši naslov.');
-  if (title.length > 100) errors.push('Naslov može imati najviše 100 znakova.');
-  if (/[<>]/.test(title) || /[<>]/.test(description)) errors.push('YouTube ne dozvoljava znakove < i > u naslovu i opisu.');
-  if (Buffer.byteLength(description, 'utf8') > 5000) errors.push('Opis je predug (najviše 5000 bajtova).');
-  if (!['public', 'unlisted', 'private'].includes(privacy)) errors.push('Izaberi vidljivost videa.');
-  if (!['yes', 'no'].includes(mfk)) errors.push('Odgovori da li je video napravljen za djecu.');
-  if (!yt.CATEGORIES.some(([id]) => id === category)) errors.push('Kategorija nije ispravna.');
+  if (!title) errors.push('Enter a title.');
+  if (title.length > 100) errors.push('The title can be at most 100 characters long.');
+  if (/[<>]/.test(title) || /[<>]/.test(description)) errors.push('YouTube does not allow the characters < and > in the title and description.');
+  if (Buffer.byteLength(description, 'utf8') > 5000) errors.push('The description is too long (5000 bytes at most).');
+  if (!['public', 'unlisted', 'private'].includes(privacy)) errors.push('Choose the video visibility.');
+  if (!['yes', 'no'].includes(mfk)) errors.push('Answer whether the video is made for kids.');
+  if (!yt.CATEGORIES.some(([id]) => id === category)) errors.push('The category is not valid.');
 
   const tags = [...new Set((form.get('tags') || '').split(',').map((t) => t.trim().replace(/[<>]/g, '')).filter(Boolean))];
   const tagChars = tags.reduce((n, t) => n + t.length + (t.includes(' ') ? 2 : 0), 0) + Math.max(0, tags.length - 1);
-  if (tagChars > 500) errors.push('Tagovi zajedno mogu imati najviše 500 znakova.');
+  if (tagChars > 500) errors.push('Tags can be at most 500 characters in total.');
 
   let publishIso = null;
   if (publishAt) {
     const d = new Date(publishAt);
-    if (Number.isNaN(d.getTime())) errors.push('Vrijeme zakazane objave nije ispravno.');
-    else if (d.getTime() < Date.now() + 15 * 60000) errors.push('Zakazana objava mora biti barem 15 minuta u budućnosti.');
-    else if (privacy !== 'public') errors.push('Za zakazanu objavu izaberi „Javno“.');
+    if (Number.isNaN(d.getTime())) errors.push('The scheduled time is not valid.');
+    else if (d.getTime() < Date.now() + 15 * 60000) errors.push('The scheduled time must be at least 15 minutes in the future.');
+    else if (privacy !== 'public') errors.push('To schedule a post, choose “Public”.');
     else publishIso = d.toISOString();
   }
 
@@ -395,11 +396,11 @@ function validateVideo(form, userId) {
         .prepare(`SELECT id, name, platform FROM accounts WHERE user_id=? AND status='active' AND id IN (${ids.map(() => '?').join(',')})`)
         .all(userId, ...ids)
     : [];
-  if (!accounts.length) errors.push('Označi barem jedan kanal.');
-  else if (accounts.length !== ids.length) errors.push('Neki od označenih kanala više nisu aktivni. Osvježi stranicu.');
+  if (!accounts.length) errors.push('Select at least one channel.');
+  else if (accounts.length !== ids.length) errors.push('Some of the selected channels are no longer active. Refresh the page.');
 
   const upload = db.prepare('SELECT * FROM uploads WHERE id=? AND user_id=? AND used=0').get(form.get('fileId') || '', userId);
-  if (!upload) errors.push('Video fajl nije pronađen. Izaberi ga ponovo.');
+  if (!upload) errors.push('The video file was not found. Choose it again.');
 
   return { errors, data: { title, description, privacy, mfk, category, tags, publishIso, accounts, upload } };
 }
@@ -444,7 +445,7 @@ route(
       db.prepare('UPDATE uploads SET used=1 WHERE id=?').run(upload.id);
     });
     worker.tick();
-    flash(ctx, 'ok', `Video „${data.title}“ je u redu za objavu na ${accounts.length} ${accounts.length === 1 ? 'kanal' : 'kanala'}.`);
+    flash(ctx, 'ok', `Video “${data.title}” is queued for publishing to ${accounts.length} ${accounts.length === 1 ? 'channel' : 'channels'}.`);
     json(ctx, { redirect: '/dashboard' });
   },
   { auth: true }
@@ -476,7 +477,7 @@ route(
         job.id
       );
       worker.tick();
-      flash(ctx, 'ok', `Ponovni pokušaj za „${job.account_name}“ je u redu.`);
+      flash(ctx, 'ok', `Retry for “${job.account_name}” is queued.`);
     }
     redirect(ctx, '/dashboard');
   },
@@ -490,12 +491,12 @@ route(
     const v = db.prepare('SELECT * FROM videos WHERE id=? AND user_id=?').get(Number(ctx.params.id), ctx.user.id);
     if (!v) return redirect(ctx, '/dashboard');
     if (db.prepare("SELECT 1 FROM jobs WHERE video_id=? AND status='uploading'").get(v.id)) {
-      flash(ctx, 'bad', 'Video se još šalje. Sačekaj da završi.');
+      flash(ctx, 'bad', 'The video is still uploading. Wait for it to finish.');
       return redirect(ctx, '/dashboard');
     }
     fs.rm(v.path, { force: true }, () => {});
     db.prepare('DELETE FROM videos WHERE id=?').run(v.id);
-    flash(ctx, 'ok', 'Zapis je obrisan.');
+    flash(ctx, 'ok', 'The record has been deleted.');
     redirect(ctx, '/dashboard');
   },
   { auth: true }
@@ -513,21 +514,21 @@ const server = http.createServer((req, res) => {
     if (!res.headersSent) {
       res.writeHead(err.status || 500, { 'content-type': 'text/plain; charset=utf-8' });
     }
-    res.end(err.status ? err.message : 'Greška na serveru.');
+    res.end(err.status ? err.message : 'Server error.');
   });
 });
 server.requestTimeout = 0; // veliki video fajlovi mogu se slati dugo
 
 server.listen(cfg.port, () => {
-  console.log(`\n  ${cfg.appName} radi na ${cfg.baseUrl}`);
-  if (!yt.isConfigured()) console.log('  ⚠ GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET nisu podešeni u .env');
-  if (!cfg.ytAudited) console.log('  ⚠ Projekat nije auditovan: YouTube će videe zaključati kao privatne.');
+  console.log(`\n  ${cfg.appName} is running at ${cfg.baseUrl}`);
+  if (!yt.isConfigured()) console.log('  ⚠ GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set in .env');
+  if (!cfg.ytAudited) console.log('  ⚠ Project is not audited: YouTube will lock videos as private.');
   console.log(`  OAuth redirect URI: ${yt.redirectUri()}\n`);
   worker.start();
 });
 
 function shutdown() {
-  console.log('\nGasim aplikaciju…');
+  console.log('\nShutting down…');
   worker.stop();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 3000).unref();

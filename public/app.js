@@ -4,7 +4,7 @@
 for (const el of document.querySelectorAll('time[data-local]')) {
   const d = new Date(el.dataset.local);
   if (!Number.isNaN(d.getTime())) {
-    el.textContent = d.toLocaleString('bs-BA', { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    el.textContent = d.toLocaleString(undefined, { day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 }
 
@@ -104,7 +104,7 @@ if (form) {
       xhr.upload.onprogress = (e) => {
         if (e.lengthComputable) {
           const pct = Math.round((e.loaded / e.total) * 100);
-          setProgress(pct, `Šaljem video u aplikaciju… ${pct}% (${fmt(e.loaded)} / ${fmt(e.total)})`);
+          setProgress(pct, `Uploading video to the app… ${pct}% (${fmt(e.loaded)} / ${fmt(e.total)})`);
         }
       };
       xhr.onload = () => {
@@ -113,9 +113,9 @@ if (form) {
           data = JSON.parse(xhr.responseText);
         } catch {}
         if (xhr.status === 200 && data.fileId) resolve(data.fileId);
-        else reject(new Error(data.error || `Greška ${xhr.status}`));
+        else reject(new Error(data.error || `Error ${xhr.status}`));
       };
-      xhr.onerror = () => reject(new Error('Veza sa aplikacijom je prekinuta.'));
+      xhr.onerror = () => reject(new Error('The connection to the app was interrupted.'));
       xhr.send(file);
     });
   }
@@ -126,11 +126,11 @@ if (form) {
 
     const errs = [];
     const file = fileInput.files[0];
-    if (!file) errs.push('Izaberi video fajl.');
-    if (!title.value.trim()) errs.push('Upiši naslov.');
-    if (!form.querySelector('input[name="privacy"]:checked')) errs.push('Izaberi vidljivost videa.');
-    if (!form.querySelector('input[name="made_for_kids"]:checked')) errs.push('Odgovori da li je video napravljen za djecu.');
-    if (!boxes.some((b) => b.checked)) errs.push('Označi barem jedan kanal.');
+    if (!file) errs.push('Choose a video file.');
+    if (!title.value.trim()) errs.push('Enter a title.');
+    if (!form.querySelector('input[name="privacy"]:checked')) errs.push('Choose the video visibility.');
+    if (!form.querySelector('input[name="made_for_kids"]:checked')) errs.push('Answer whether the video is made for kids.');
+    if (!boxes.some((b) => b.checked)) errs.push('Select at least one channel.');
     if (errs.length) return showErrors(errs);
 
     submit.disabled = true;
@@ -141,7 +141,7 @@ if (form) {
         fileId = await sendFile(file);
         uploadedFor = { file, fileId };
       }
-      setProgress(100, 'Pripremam objavu…');
+      setProgress(100, 'Preparing the post…');
 
       const body = new URLSearchParams(new FormData(form));
       body.delete('file');
@@ -157,7 +157,7 @@ if (form) {
         return;
       }
       progress.hidden = true;
-      showErrors(data.errors || [data.error || `Greška ${r.status}`]);
+      showErrors(data.errors || [data.error || `Error ${r.status}`]);
     } catch (err) {
       progress.hidden = true;
       showErrors([err.message]);

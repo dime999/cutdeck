@@ -18,7 +18,7 @@ function layout(ctx, title, body) {
     ? `<div class="flash ${h(ctx.flash.type)}" role="status">${h(ctx.flash.msg)}</div>`
     : '';
   return `<!doctype html>
-<html lang="bs">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -31,8 +31,8 @@ function layout(ctx, title, body) {
   <a class="brand" href="/">${h(cfg.appName)}</a>
   ${
     user
-      ? `<nav>${nav('/upload', 'Novi video')}${nav('/dashboard', 'Objave')}${nav('/accounts', 'Kanali')}</nav>
-         <form method="post" action="/logout" class="logout"><span class="who">${h(user.name)}</span><button class="link">Odjava</button></form>`
+      ? `<nav>${nav('/upload', 'New video')}${nav('/dashboard', 'Posts')}${nav('/accounts', 'Channels')}</nav>
+         <form method="post" action="/logout" class="logout"><span class="who">${h(user.name)}</span><button class="link">Log out</button></form>`
       : ''
   }
 </header>
@@ -41,7 +41,7 @@ ${flash}
 ${body}
 </main>
 <footer class="foot">
-  <a href="/privacy">Politika privatnosti</a> · <a href="/terms">Uslovi korištenja</a>
+  <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a>
 </footer>
 <script src="/static/app.js" defer></script>
 </body>
@@ -52,16 +52,16 @@ ${body}
 function loginPage(ctx, { email = '', error = '' } = {}) {
   return layout(
     ctx,
-    'Prijava',
+    'Log in',
     `<section class="card narrow">
-  <h1>Prijava</h1>
+  <h1>Log in</h1>
   ${error ? `<p class="error">${h(error)}</p>` : ''}
   <form method="post" action="/login" class="stack">
     <label>Email<input type="email" name="email" value="${h(email)}" required autofocus autocomplete="email"></label>
-    <label>Lozinka<input type="password" name="password" required autocomplete="current-password"></label>
-    <button class="primary">Prijavi se</button>
+    <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+    <button class="primary">Log in</button>
   </form>
-  <p class="muted">Nemaš nalog? <a href="/register">Registruj se</a></p>
+  <p class="muted">Don't have an account? <a href="/register">Sign up</a></p>
 </section>`
   );
 }
@@ -69,18 +69,18 @@ function loginPage(ctx, { email = '', error = '' } = {}) {
 function registerPage(ctx, { values = {}, error = '', needsInvite = true } = {}) {
   return layout(
     ctx,
-    'Registracija',
+    'Sign up',
     `<section class="card narrow">
-  <h1>Registracija</h1>
+  <h1>Sign up</h1>
   ${error ? `<p class="error">${h(error)}</p>` : ''}
   <form method="post" action="/register" class="stack">
-    <label>Ime<input name="name" value="${h(values.name)}" required maxlength="60" autocomplete="name"></label>
+    <label>Name<input name="name" value="${h(values.name)}" required maxlength="60" autocomplete="name"></label>
     <label>Email<input type="email" name="email" value="${h(values.email)}" required autocomplete="email"></label>
-    <label>Lozinka <span class="muted">(najmanje 8 znakova)</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
-    ${needsInvite ? `<label>Pozivni kod<input name="invite" value="${h(values.invite)}" required></label>` : ''}
-    <button class="primary">Napravi nalog</button>
+    <label>Password <span class="muted">(at least 8 characters)</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+    ${needsInvite ? `<label>Invite code<input name="invite" value="${h(values.invite)}" required></label>` : ''}
+    <button class="primary">Create account</button>
   </form>
-  <p class="muted">Već imaš nalog? <a href="/login">Prijavi se</a></p>
+  <p class="muted">Already have an account? <a href="/login">Log in</a></p>
 </section>`
   );
 }
@@ -93,15 +93,15 @@ function accountsPage(ctx, { accounts, configured }) {
     ${a.thumbnail ? `<img src="${h(a.thumbnail)}" alt="" width="40" height="40">` : '<span class="avatar"></span>'}
     <div class="grow">
       <strong>${h(a.name)}</strong>
-      <span class="muted small">YouTube · povezan <time data-local="${h(a.created_at)}">${h(a.created_at)}</time></span>
+      <span class="muted small">YouTube · connected <time data-local="${h(a.created_at)}">${h(a.created_at)}</time></span>
     </div>
     ${
       a.status === 'active'
-        ? '<span class="chip ok">Aktivan</span>'
-        : `<span class="chip warn">Treba ponovo povezati</span><a class="button" href="/oauth/youtube/start">Ponovo poveži</a>`
+        ? '<span class="chip ok">Active</span>'
+        : `<span class="chip warn">Needs reconnecting</span><a class="button" href="/oauth/youtube/start">Reconnect</a>`
     }
-    <form method="post" action="/accounts/${a.id}/disconnect" data-confirm="Odspojiti kanal „${h(a.name)}“? Aplikacija će izgubiti pristup ovom kanalu.">
-      <button class="danger-outline">Odspoji</button>
+    <form method="post" action="/accounts/${a.id}/disconnect" data-confirm="Disconnect the channel “${h(a.name)}”? The app will lose access to this channel.">
+      <button class="danger-outline">Disconnect</button>
     </form>
   </li>`
     )
@@ -109,28 +109,28 @@ function accountsPage(ctx, { accounts, configured }) {
 
   return layout(
     ctx,
-    'Kanali',
+    'Channels',
     `<div class="page-head">
-  <h1>Povezani kanali</h1>
-  ${configured ? '<a class="button primary" href="/oauth/youtube/start">+ Poveži YouTube kanal</a>' : ''}
+  <h1>Connected channels</h1>
+  ${configured ? '<a class="button primary" href="/oauth/youtube/start">+ Connect YouTube channel</a>' : ''}
 </div>
 ${
   configured
     ? ''
-    : `<div class="notice warn"><strong>Google pristup nije podešen.</strong> Upiši GOOGLE_CLIENT_ID i GOOGLE_CLIENT_SECRET u <code>.env</code> i ponovo pokreni aplikaciju (vidi README, korak 1).</div>`
+    : `<div class="notice warn"><strong>Google access is not configured.</strong> Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in <code>.env</code> and restart the app (see README, step 1).</div>`
 }
 ${
   accounts.length
     ? `<ul class="list">${rows}</ul>`
-    : '<div class="empty">Još nema povezanih kanala.</div>'
+    : '<div class="empty">No channels connected yet.</div>'
 }
 <div class="notice">
-  <p><strong>Više kanala na jednom Google nalogu?</strong> Klikni „Poveži YouTube kanal“ za svaki kanal posebno i na Googleovom ekranu izaberi željeni kanal (brand nalog).</p>
-  <p>Pristup možeš opozvati i direktno u <a href="${GOOGLE_PERMISSIONS}" target="_blank" rel="noopener">postavkama Google naloga</a>.</p>
+  <p><strong>Several channels on one Google account?</strong> Click “Connect YouTube channel” once for each channel and pick the channel you want (brand account) on Google's screen.</p>
+  <p>You can also revoke access directly in your <a href="${GOOGLE_PERMISSIONS}" target="_blank" rel="noopener">Google Account settings</a>.</p>
   ${
     cfg.ytAudited
       ? ''
-      : '<p><strong>Napomena:</strong> dok Google ne odobri audit, prijava ističe nakon 7 dana i kanal se mora ponovo povezati.</p>'
+      : '<p><strong>Note:</strong> until Google approves the audit, the sign-in expires after 7 days and the channel has to be reconnected.</p>'
   }
 </div>`
   );
@@ -151,81 +151,81 @@ function uploadPage(ctx, { accounts }) {
 
   const auditBanner = cfg.ytAudited
     ? ''
-    : `<div class="notice warn"><strong>Projekat još nije prošao Google audit.</strong> YouTube će svaki video zaključati kao privatan, bez obzira na izbor ispod. Koristi testni kanal dok audit ne bude odobren.</div>`;
+    : `<div class="notice warn"><strong>This project has not passed the Google audit yet.</strong> YouTube will lock every video as private, whatever you choose below. Use a test channel until the audit is approved.</div>`;
 
   if (!active.length) {
     return layout(
       ctx,
-      'Novi video',
-      `<h1>Novi video</h1>${auditBanner}
-<div class="empty">Prvo poveži barem jedan kanal. <a class="button primary" href="/accounts">Idi na Kanale</a></div>`
+      'New video',
+      `<h1>New video</h1>${auditBanner}
+<div class="empty">Connect at least one channel first. <a class="button primary" href="/accounts">Go to Channels</a></div>`
     );
   }
 
   return layout(
     ctx,
-    'Novi video',
-    `<h1>Novi video</h1>
+    'New video',
+    `<h1>New video</h1>
 ${auditBanner}
 <form id="upload-form" class="grid" novalidate>
   <section class="card">
     <h2>1. Video</h2>
     <label class="drop" id="drop">
       <input type="file" name="file" id="file" accept="video/*" required>
-      <span id="drop-text"><strong>Izaberi video</strong> ili ga prevuci ovdje</span>
+      <span id="drop-text"><strong>Choose a video</strong> or drag it here</span>
     </label>
 
-    <h2>2. Detalji</h2>
-    <label>Naslov <span class="counter" data-for="title" data-max="100"></span>
+    <h2>2. Details</h2>
+    <label>Title <span class="counter" data-for="title" data-max="100"></span>
       <input name="title" id="title" maxlength="100" required>
     </label>
-    <label>Opis <span class="counter" data-for="description" data-max="5000"></span>
+    <label>Description <span class="counter" data-for="description" data-max="5000"></span>
       <textarea name="description" id="description" rows="6" maxlength="5000"></textarea>
     </label>
-    <label>Tagovi <span class="muted">(odvojeni zarezom)</span>
-      <input name="tags" placeholder="npr. vlog, putovanje, sarajevo">
+    <label>Tags <span class="muted">(comma-separated)</span>
+      <input name="tags" placeholder="e.g. vlog, travel, sarajevo">
     </label>
-    <label>Kategorija
+    <label>Category
       <select name="category">${CATEGORIES.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
     </label>
 
     <fieldset>
-      <legend>Vidljivost</legend>
-      <label class="radio"><input type="radio" name="privacy" value="public" required> <span><strong>Javno</strong> – svi mogu vidjeti</span></label>
-      <label class="radio"><input type="radio" name="privacy" value="unlisted"> <span><strong>Nenavedeno</strong> – samo ko ima link</span></label>
-      <label class="radio"><input type="radio" name="privacy" value="private"> <span><strong>Privatno</strong> – samo ti</span></label>
+      <legend>Visibility</legend>
+      <label class="radio"><input type="radio" name="privacy" value="public" required> <span><strong>Public</strong> – everyone can watch</span></label>
+      <label class="radio"><input type="radio" name="privacy" value="unlisted"> <span><strong>Unlisted</strong> – only people with the link</span></label>
+      <label class="radio"><input type="radio" name="privacy" value="private"> <span><strong>Private</strong> – only you</span></label>
     </fieldset>
 
     <fieldset>
-      <legend>Da li je video napravljen za djecu?</legend>
-      <label class="radio"><input type="radio" name="made_for_kids" value="no" required> <span>Ne, nije napravljen za djecu</span></label>
-      <label class="radio"><input type="radio" name="made_for_kids" value="yes"> <span>Da, napravljen je za djecu</span></label>
-      <p class="muted small">Ovo zahtijeva zakon (COPPA) i YouTube pravila.</p>
+      <legend>Is this video made for kids?</legend>
+      <label class="radio"><input type="radio" name="made_for_kids" value="no" required> <span>No, it's not made for kids</span></label>
+      <label class="radio"><input type="radio" name="made_for_kids" value="yes"> <span>Yes, it's made for kids</span></label>
+      <p class="muted small">This is required by law (COPPA) and by YouTube's rules.</p>
     </fieldset>
 
     <details>
-      <summary>Zakaži objavu (opcionalno)</summary>
-      <label>Datum i vrijeme objave
+      <summary>Schedule (optional)</summary>
+      <label>Publish date and time
         <input type="datetime-local" name="schedule" id="schedule">
       </label>
-      <p class="muted small">Video se odmah uploaduje kao privatan i automatski postaje javan u zadato vrijeme. Za zakazivanje izaberi „Javno“.</p>
+      <p class="muted small">The video is uploaded right away as private and becomes public automatically at the set time. To schedule, choose “Public”.</p>
     </details>
   </section>
 
   <section class="card">
-    <h2>3. Kanali</h2>
-    <label class="channel all"><input type="checkbox" id="select-all"> <span>Označi sve (${active.length})</span></label>
+    <h2>3. Channels</h2>
+    <label class="channel all"><input type="checkbox" id="select-all"> <span>Select all (${active.length})</span></label>
     <div class="channels">${channelList}</div>
 
     <p class="legal">
-      Objavljivanjem potvrđuješ da prihvataš <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube uslove korištenja</a>
-      i da se Google podaci obrađuju prema <a href="${GOOGLE_PRIVACY}" target="_blank" rel="noopener">Google politici privatnosti</a>.
-      Video se objavljuje samo na kanalima koje si označio.
+      By publishing you confirm that you accept the <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube Terms of Service</a>
+      and that Google data is processed under the <a href="${GOOGLE_PRIVACY}" target="_blank" rel="noopener">Google Privacy Policy</a>.
+      The video is published only to the channels you selected.
     </p>
 
     <p class="error" id="form-error" hidden></p>
     <div class="progress" id="progress" hidden><div class="bar"></div><span class="label"></span></div>
-    <button class="primary big" id="submit">Objavi na označenim kanalima</button>
+    <button class="primary big" id="submit">Publish to selected channels</button>
   </section>
 </form>`
   );
@@ -233,12 +233,12 @@ ${auditBanner}
 
 // ── Objave ────────────────────────────────────────────────
 const STATUS = {
-  pending: ['Na čekanju', 'muted'],
-  uploading: ['Šalje se', 'info'],
-  done: ['Objavljeno', 'ok'],
-  failed: ['Greška', 'bad'],
+  pending: ['Pending', 'muted'],
+  uploading: ['Uploading', 'info'],
+  done: ['Published', 'ok'],
+  failed: ['Failed', 'bad'],
 };
-const PRIVACY = { public: 'Javno', unlisted: 'Nenavedeno', private: 'Privatno' };
+const PRIVACY = { public: 'Public', unlisted: 'Unlisted', private: 'Private' };
 
 function fmtSize(bytes) {
   if (bytes > 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -261,10 +261,10 @@ function dashboardPage(ctx, { videos, uploadsToday }) {
             ${j.error ? `<p class="small ${j.status === 'failed' ? 'error' : 'muted'}">${h(j.error)}</p>` : ''}
           </div>
           <span class="chip ${cls}">${label}</span>
-          ${j.external_url ? `<a class="button" href="${h(j.external_url)}" target="_blank" rel="noopener">Otvori</a>` : ''}
+          ${j.external_url ? `<a class="button" href="${h(j.external_url)}" target="_blank" rel="noopener">Open</a>` : ''}
           ${
             j.status === 'failed'
-              ? `<form method="post" action="/jobs/${j.id}/retry"><button>Pokušaj ponovo</button></form>`
+              ? `<form method="post" action="/jobs/${j.id}/retry"><button>Retry</button></form>`
               : ''
           }
         </li>`;
@@ -277,15 +277,15 @@ function dashboardPage(ctx, { videos, uploadsToday }) {
           <h2>${h(v.title)}</h2>
           <p class="muted small">
             ${PRIVACY[v.privacy] || h(v.privacy)}
-            ${v.publish_at ? ` · zakazano za <time data-local="${h(v.publish_at)}">${h(v.publish_at)}</time>` : ''}
+            ${v.publish_at ? ` · scheduled for <time data-local="${h(v.publish_at)}">${h(v.publish_at)}</time>` : ''}
             · ${fmtSize(v.size)} · <time data-local="${h(v.created_at)}">${h(v.created_at)}</time>
-            · ${done}/${v.jobs.length} objavljeno
+            · ${done}/${v.jobs.length} published
           </p>
         </div>
         ${
           busy
             ? ''
-            : `<form method="post" action="/videos/${v.id}/delete" data-confirm="Obrisati ovaj zapis iz aplikacije? Videi koji su već na YouTubeu ostaju tamo."><button class="danger-outline">Obriši zapis</button></form>`
+            : `<form method="post" action="/videos/${v.id}/delete" data-confirm="Delete this record from the app? Videos already on YouTube stay there."><button class="danger-outline">Delete record</button></form>`
         }
       </div>
       <ul class="jobs">${jobs}</ul>
@@ -295,59 +295,59 @@ function dashboardPage(ctx, { videos, uploadsToday }) {
 
   return layout(
     ctx,
-    'Objave',
+    'Posts',
     `<div class="page-head">
-  <h1>Objave</h1>
-  <a class="button primary" href="/upload">+ Novi video</a>
+  <h1>Posts</h1>
+  <a class="button primary" href="/upload">+ New video</a>
 </div>
-<p class="muted small quota">Uploada danas (Google kvota se resetuje u 09:00 po našem vremenu): <strong>${uploadsToday}</strong> / ~100</p>
-${videos.length ? cards : '<div class="empty">Još nema objava. <a href="/upload">Objavi prvi video</a></div>'}
+<p class="muted small quota">Uploads today (the Google quota resets at midnight Pacific Time): <strong>${uploadsToday}</strong> / ~100</p>
+${videos.length ? cards : '<div class="empty">No posts yet. <a href="/upload">Publish your first video</a></div>'}
 ${active ? '<div data-autorefresh="4000" hidden></div>' : ''}`
   );
 }
 
 // ── Pravne stranice (trebaju za Google audit) ──────────────
 function privacyPage(ctx) {
-  const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'administratora aplikacije';
+  const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the app administrator';
   return layout(
     ctx,
-    'Politika privatnosti',
+    'Privacy Policy',
     `<article class="card prose">
-<h1>Politika privatnosti</h1>
-<p class="muted">Posljednja izmjena: 12. oktobar 2026.</p>
+<h1>Privacy Policy</h1>
+<p class="muted">Last updated: October 12, 2026.</p>
 
-<p>${h(cfg.appName)} je aplikacija koja korisnicima omogućava da jedan video objave na više svojih YouTube kanala odjednom. Ova politika objašnjava koje podatke aplikacija koristi i zašto.</p>
+<p>${h(cfg.appName)} is an app that lets users publish one video to several of their YouTube channels at once. This policy explains what data the app uses and why.</p>
 
-<h2>YouTube API usluge</h2>
-<p>${h(cfg.appName)} koristi YouTube API usluge. Korištenjem aplikacije prihvataš <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube uslove korištenja</a>. Podaci dobijeni od Googlea obrađuju se i u skladu sa <a href="${GOOGLE_PRIVACY}" target="_blank" rel="noopener">Google politikom privatnosti</a>.</p>
+<h2>YouTube API Services</h2>
+<p>${h(cfg.appName)} uses YouTube API Services. By using the app you agree to the <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube Terms of Service</a>. Data received from Google is also processed in line with the <a href="${GOOGLE_PRIVACY}" target="_blank" rel="noopener">Google Privacy Policy</a>.</p>
 
-<h2>Koje podatke prikupljamo</h2>
+<h2>What data we collect</h2>
 <ul>
-  <li><strong>Podaci naloga:</strong> ime, email adresa i lozinka (sačuvana samo kao kriptografski hash).</li>
-  <li><strong>Podaci YouTube kanala:</strong> ID kanala, naziv i sličica kanala, preuzeti preko YouTube API-ja kada povežeš kanal.</li>
-  <li><strong>OAuth tokeni:</strong> pristupni tokeni koje izdaje Google, sačuvani šifrovano (AES-256-GCM).</li>
-  <li><strong>Video sadržaj:</strong> video fajl, naslov, opis, tagovi i postavke koje uneseš.</li>
+  <li><strong>Account data:</strong> name, email address and password (stored only as a cryptographic hash).</li>
+  <li><strong>YouTube channel data:</strong> channel ID, channel name and thumbnail, fetched through the YouTube API when you connect a channel.</li>
+  <li><strong>OAuth tokens:</strong> access tokens issued by Google, stored encrypted (AES-256-GCM).</li>
+  <li><strong>Video content:</strong> the video file, title, description, tags and settings you enter.</li>
 </ul>
 
-<h2>Kako koristimo podatke</h2>
-<p>Podatke koristimo isključivo da bismo, na tvoj izričit zahtjev, uploadovali video na kanale koje si označio i prikazali status objave. Aplikacija ne čita, ne analizira i ne mijenja ništa drugo na tvojim kanalima. Dozvole koje tražimo su <code>youtube.upload</code> (objava videa) i <code>youtube.readonly</code> (prikaz naziva i sličice kanala).</p>
+<h2>How we use data</h2>
+<p>We use the data only to upload a video, at your explicit request, to the channels you selected and to show the status of the post. The app does not read, analyze or change anything else on your channels. The permissions we request are <code>youtube.upload</code> (publishing videos) and <code>youtube.readonly</code> (showing the channel name and thumbnail).</p>
 
-<h2>Dijeljenje podataka</h2>
-<p>Podatke ne prodajemo i ne dijelimo sa trećim stranama. Jedina strana kojoj se podaci šalju je Google/YouTube, i to samo radi objave videa koju si sam pokrenuo.</p>
+<h2>Data sharing</h2>
+<p>We do not sell data and do not share it with third parties. The only party data is sent to is Google/YouTube, and only to publish a video you started yourself.</p>
 
-<h2>Čuvanje i brisanje</h2>
+<h2>Retention and deletion</h2>
 <ul>
-  <li>Video fajl se automatski briše sa servera aplikacije čim je objavljen na svim izabranim kanalima.</li>
-  <li>Kada odspojiš kanal, aplikacija opoziva Google pristup i briše sačuvane tokene.</li>
-  <li>Pristup možeš opozvati i u bilo kojem trenutku na stranici <a href="${GOOGLE_PERMISSIONS}" target="_blank" rel="noopener">sigurnosnih postavki Google naloga</a>.</li>
-  <li>Za brisanje cijelog naloga i svih podataka kontaktiraj ${contact}.</li>
+  <li>The video file is deleted from the app's server automatically as soon as it is published to all selected channels.</li>
+  <li>When you disconnect a channel, the app revokes Google access and deletes the stored tokens.</li>
+  <li>You can also revoke access at any time on the <a href="${GOOGLE_PERMISSIONS}" target="_blank" rel="noopener">Google Account security settings</a> page.</li>
+  <li>To delete your whole account and all data, contact ${contact}.</li>
 </ul>
 
-<h2>Kolačići</h2>
-<p>Aplikacija koristi jedan kolačić neophodan za prijavu. Ne koristimo kolačiće za praćenje ili reklame.</p>
+<h2>Cookies</h2>
+<p>The app uses one cookie that is required for signing in. We do not use cookies for tracking or advertising.</p>
 
-<h2>Kontakt</h2>
-<p>Pitanja o privatnosti: ${contact}.</p>
+<h2>Contact</h2>
+<p>Privacy questions: ${contact}.</p>
 </article>`
   );
 }
@@ -355,20 +355,20 @@ function privacyPage(ctx) {
 function termsPage(ctx) {
   return layout(
     ctx,
-    'Uslovi korištenja',
+    'Terms of Service',
     `<article class="card prose">
-<h1>Uslovi korištenja</h1>
-<p class="muted">Posljednja izmjena: 12. oktobar 2026.</p>
-<p>Korištenjem aplikacije ${h(cfg.appName)} prihvataš ove uslove.</p>
+<h1>Terms of Service</h1>
+<p class="muted">Last updated: October 12, 2026.</p>
+<p>By using ${h(cfg.appName)} you accept these terms.</p>
 <ol>
-  <li>Aplikacija koristi YouTube API usluge. Korištenjem aplikacije obavezuješ se na <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube uslove korištenja</a>.</li>
-  <li>Smiješ povezivati samo kanale koje posjeduješ ili za koje imaš dozvolu vlasnika.</li>
-  <li>Odgovoran si za sadržaj koji objavljuješ, uključujući autorska prava i YouTube smjernice zajednice.</li>
-  <li>Zabranjeno je koristiti aplikaciju za spam, obmanjujuće ponašanje ili zaobilaženje YouTube pravila.</li>
-  <li>Aplikacija se pruža „kakva jeste“, bez garancije da će svaka objava uspjeti.</li>
-  <li>Pristup možemo ukinuti nalogu koji krši ove uslove.</li>
+  <li>The app uses YouTube API Services. By using the app you agree to be bound by the <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube Terms of Service</a>.</li>
+  <li>You may only connect channels you own or have the owner's permission to use.</li>
+  <li>You are responsible for the content you publish, including copyright and the YouTube Community Guidelines.</li>
+  <li>Using the app for spam, deceptive behavior or getting around YouTube's rules is prohibited.</li>
+  <li>The app is provided “as is”, with no guarantee that every post will succeed.</li>
+  <li>We may remove access for an account that breaks these terms.</li>
 </ol>
-<p>Obrada podataka opisana je u <a href="/privacy">Politici privatnosti</a>.</p>
+<p>Data processing is described in the <a href="/privacy">Privacy Policy</a>.</p>
 </article>`
   );
 }
@@ -376,8 +376,8 @@ function termsPage(ctx) {
 function errorPage(ctx, status, message) {
   return layout(
     ctx,
-    'Greška',
-    `<section class="card narrow"><h1>${status === 404 ? 'Stranica ne postoji' : 'Nešto nije u redu'}</h1><p>${h(message)}</p><p><a href="/">Nazad na početnu</a></p></section>`
+    'Error',
+    `<section class="card narrow"><h1>${status === 404 ? 'Page not found' : 'Something went wrong'}</h1><p>${h(message)}</p><p><a href="/">Back to home</a></p></section>`
   );
 }
 
