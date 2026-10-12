@@ -11,7 +11,9 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const cfg = require('./config');
 
-fs.mkdirSync(path.join(cfg.dataDir, 'uploads'), { recursive: true });
+for (const dir of [path.join(cfg.dataDir, 'uploads'), cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir]) {
+  fs.mkdirSync(dir, { recursive: true });
+}
 const db = new DatabaseSync(path.join(cfg.dataDir, 'app.db'));
 
 db.exec(`
@@ -87,7 +89,58 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status, next_attempt_at);
 CREATE INDEX IF NOT EXISTS jobs_video ON jobs(video_id);
+
+CREATE TABLE IF NOT EXISTS recordings (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  path       TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL,
+  size       INTEGER NOT NULL,
+  duration   REAL,
+  width      INTEGER,
+  height     INTEGER,
+  status     TEXT NOT NULL DEFAULT 'pending', -- pending | analyzing | ready | failed
+  progress   INTEGER NOT NULL DEFAULT 0,
+  error      TEXT,
+  waveform   TEXT,                             -- JSON: glasnoća 0–100 po stubiću vremenske trake
+  hidden     INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS moments (
+  id           INTEGER PRIMARY KEY,
+  recording_id INTEGER NOT NULL REFERENCES recordings(id) ON DELETE CASCADE,
+  start_s      REAL NOT NULL,
+  end_s        REAL NOT NULL,
+  score        INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS moments_recording ON moments(recording_id);
+
+CREATE TABLE IF NOT EXISTS clips (
+  id             INTEGER PRIMARY KEY,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  recording_id   INTEGER REFERENCES recordings(id) ON DELETE SET NULL,
+  recording_name TEXT NOT NULL,
+  title          TEXT NOT NULL,
+  start_s        REAL NOT NULL,
+  end_s          REAL NOT NULL,
+  layout         TEXT NOT NULL,
+  path           TEXT NOT NULL,
+  size           INTEGER NOT NULL DEFAULT 0,
+  status         TEXT NOT NULL DEFAULT 'pending', -- pending | rendering | ready | failed
+  progress       INTEGER NOT NULL DEFAULT 0,
+  error          TEXT,
+  created_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS clips_status ON clips(status);
 `);
+
+// Kolone dodane nakon što je tabela već mogla biti napravljena.
+function addColumn(table, column, type) {
+  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+addColumn('recordings', 'waveform', 'TEXT');
 
 db.now = () => new Date().toISOString();
 

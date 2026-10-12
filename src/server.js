@@ -8,6 +8,8 @@ const cfg = require('./lib/config');
 const db = require('./lib/db');
 const yt = require('./lib/youtube');
 const worker = require('./lib/worker');
+const media = require('./lib/media');
+const studio = require('./lib/studio');
 const sec = require('./lib/security');
 const views = require('./views');
 
@@ -311,7 +313,11 @@ route(
   '/upload',
   (ctx) => {
     const accounts = db.prepare('SELECT * FROM accounts WHERE user_id=? ORDER BY name COLLATE NOCASE').all(ctx.user.id);
-    html(ctx, views.uploadPage(ctx, { accounts }));
+    // Short poslan sa stranice „Shorts“: fajl je već u aplikaciji.
+    const preset = ctx.query.get('fileId')
+      ? db.prepare('SELECT id, original_name, size FROM uploads WHERE id=? AND user_id=? AND used=0').get(ctx.query.get('fileId'), ctx.user.id)
+      : null;
+    html(ctx, views.uploadPage(ctx, { accounts, preset, title: (ctx.query.get('title') || '').slice(0, 100) }));
   },
   { auth: true }
 );
@@ -502,6 +508,293 @@ route(
   { auth: true }
 );
 
+// ── Rute: snimci i Shorts ─────────────────────────────────
+const MEDIA_MIME = {
+  '.mp4': 'video/mp4',
+  '.m4v': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mov': 'video/quicktime',
+  '.mkv': 'video/x-matroska',
+  '.jpg': 'image/jpeg',
+};
+
+// Šalje video ili sličicu uz podršku za Range, da player može premotavati.
+function sendFile(ctx, file, downloadName) {
+  const stat = fs.statSync(file, { throwIfNoEntry: false });
+  if (!stat || !stat.isFile() || !stat.size) return html(ctx, views.errorPage(ctx, 404, 'The file no longer exists on disk.'), 404);
+  let start = 0;
+  let end = stat.size - 1;
+  const range = /^bytes=(\d*)-(\d*)$/.exec(ctx.req.headers.range || '');
+  const partial = Boolean(range && (range[1] || range[2]));
+  if (partial) {
+    if (range[1]) {
+      start = Number(range[1]);
+      if (range[2]) end = Math.min(end, Number(range[2]));
+    } else {
+      start = Math.max(0, stat.size - Number(range[2]));
+    }
+    if (start > end) {
+      ctx.res.writeHead(416, baseHeaders(ctx, { 'content-range': `bytes */${stat.size}` }));
+      return ctx.res.end();
+    }
+  }
+  const headers = baseHeaders(ctx, {
+    'content-type': MEDIA_MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+    'content-length': end - start + 1,
+    'accept-ranges': 'bytes',
+  });
+  if (partial) headers['content-range'] = `bytes ${start}-${end}/${stat.size}`;
+  if (downloadName) headers['content-disposition'] = `attachment; filename*=UTF-8''${encodeURIComponent(downloadName)}`;
+  ctx.res.writeHead(partial ? 206 : 200, headers);
+  if (ctx.req.method === 'HEAD') return ctx.res.end();
+  const stream = fs.createReadStream(file, { start, end });
+  stream.on('error', () => ctx.res.destroy());
+  ctx.res.on('close', () => stream.destroy());
+  stream.pipe(ctx.res);
+}
+
+// "1:02:03", "12:34.5" ili "75" → sekunde (NaN ako nije ispravno).
+function parseTime(text) {
+  const parts = String(text || '').trim().split(':');
+  if (!parts[0] || parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) return NaN;
+  return parts.reduce((total, p) => total * 60 + Number(p), 0);
+}
+
+const userRecording = (ctx) =>
+  db.prepare('SELECT * FROM recordings WHERE id=? AND user_id=? AND hidden=0').get(Number(ctx.params.id), ctx.user.id);
+const userClip = (ctx) => db.prepare('SELECT * FROM clips WHERE id=? AND user_id=?').get(Number(ctx.params.id), ctx.user.id);
+
+route(
+  'GET',
+  '/recordings',
+  (ctx) => {
+    const recordings = db.prepare('SELECT * FROM recordings WHERE user_id=? AND hidden=0 ORDER BY id DESC').all(ctx.user.id);
+    const momentStmt = db.prepare('SELECT * FROM moments WHERE recording_id=? ORDER BY start_s');
+    for (const r of recordings) {
+      r.moments = momentStmt.all(r.id);
+      r.hasThumb = fs.existsSync(studio.thumbPath('rec', r.id));
+    }
+    html(ctx, views.recordingsPage(ctx, { recordings, ffmpegOk: media.isAvailable(), folder: cfg.recordingsDir }));
+  },
+  { auth: true }
+);
+
+route(
+  'POST',
+  '/recordings/scan',
+  (ctx) => {
+    const added = studio.scan(ctx.user.id);
+    flash(ctx, 'ok', added ? `Added ${added} new ${added === 1 ? 'recording' : 'recordings'}.` : 'No new recordings found in the folder.');
+    redirect(ctx, '/recordings');
+  },
+  { auth: true }
+);
+
+route(
+  'GET',
+  '/recordings/:id',
+  (ctx) => {
+    const rec = userRecording(ctx);
+    if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
+    const moments = db.prepare('SELECT * FROM moments WHERE recording_id=? ORDER BY start_s').all(rec.id);
+    const clips = db.prepare('SELECT * FROM clips WHERE recording_id=? AND user_id=? ORDER BY id DESC').all(rec.id, ctx.user.id);
+    rec.hasThumb = fs.existsSync(studio.thumbPath('rec', rec.id));
+    html(ctx, views.recordingPage(ctx, { rec, moments, clips: withThumbs(clips), ffmpegOk: media.isAvailable() }));
+  },
+  { auth: true }
+);
+
+function withThumbs(clips) {
+  for (const c of clips) c.hasThumb = fs.existsSync(studio.thumbPath('clip', c.id));
+  return clips;
+}
+
+route(
+  'GET',
+  '/recordings/:id/thumb',
+  (ctx) => {
+    const rec = userRecording(ctx);
+    if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
+    sendFile(ctx, studio.thumbPath('rec', rec.id));
+  },
+  { auth: true }
+);
+
+route(
+  'GET',
+  '/clips/:id/thumb',
+  (ctx) => {
+    const clip = userClip(ctx);
+    if (!clip) return html(ctx, views.errorPage(ctx, 404, 'This Short does not exist.'), 404);
+    sendFile(ctx, studio.thumbPath('clip', clip.id));
+  },
+  { auth: true }
+);
+
+route(
+  'GET',
+  '/recordings/:id/file',
+  (ctx) => {
+    const rec = userRecording(ctx);
+    if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
+    sendFile(ctx, rec.path);
+  },
+  { auth: true }
+);
+
+route(
+  'POST',
+  '/recordings/:id/analyze',
+  (ctx) => {
+    const rec = userRecording(ctx);
+    if (!rec) return redirect(ctx, '/recordings');
+    if (rec.status === 'failed' || rec.status === 'ready') {
+      db.prepare("UPDATE recordings SET status='pending', progress=0, error=NULL WHERE id=?").run(rec.id);
+      studio.tick();
+    }
+    redirect(ctx, `/recordings/${rec.id}`);
+  },
+  { auth: true }
+);
+
+route(
+  'POST',
+  '/recordings/:id/remove',
+  (ctx) => {
+    const rec = userRecording(ctx);
+    if (!rec) return redirect(ctx, '/recordings');
+    if (rec.status === 'analyzing') {
+      flash(ctx, 'bad', 'This recording is being analyzed. Wait for it to finish.');
+      return redirect(ctx, '/recordings');
+    }
+    // Fajl ostaje na disku; zapis se samo sakriva da ga sljedeće skeniranje ne vrati.
+    db.transaction(() => {
+      db.prepare('DELETE FROM moments WHERE recording_id=?').run(rec.id);
+      db.prepare('UPDATE recordings SET hidden=1 WHERE id=?').run(rec.id);
+    });
+    flash(ctx, 'ok', `“${rec.name}” was removed from the list. The file is still on disk.`);
+    redirect(ctx, '/recordings');
+  },
+  { auth: true }
+);
+
+route(
+  'POST',
+  '/recordings/:id/clips',
+  async (ctx) => {
+    const rec = userRecording(ctx);
+    if (!rec) return redirect(ctx, '/recordings');
+    const form = await readForm(ctx.req);
+    const back = `/recordings/${rec.id}`;
+    const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, back));
+
+    const start = parseTime(form.get('start'));
+    const end = parseTime(form.get('end'));
+    const layout = form.get('layout');
+    if (!media.isAvailable()) return fail('ffmpeg is not installed, so Shorts cannot be created yet.');
+    if (rec.status !== 'ready') return fail('Wait for the analysis of this recording to finish.');
+    if (Number.isNaN(start) || Number.isNaN(end)) return fail('Enter the start and end as m:ss, for example 12:34.');
+    if (end - start < studio.MIN_CLIP) return fail(`A Short must be at least ${studio.MIN_CLIP} seconds long.`);
+    if (end - start > studio.MAX_CLIP) return fail(`A Short can be at most ${studio.MAX_CLIP} seconds long.`);
+    if (end > rec.duration + 0.5) return fail('The end is past the end of the recording.');
+    if (!media.LAYOUTS.some(([id]) => id === layout)) return fail('Choose a layout.');
+
+    const title = (form.get('title') || '').trim().slice(0, 100) || `${path.parse(rec.name).name} ${views.fmtTime(start)}`.slice(0, 100);
+    studio.createClip(rec, { title, start, end: Math.min(end, rec.duration), layout });
+    flash(ctx, 'ok', `Short “${title}” is being created.`);
+    redirect(ctx, back);
+  },
+  { auth: true }
+);
+
+route(
+  'GET',
+  '/shorts',
+  (ctx) => {
+    const clips = db.prepare('SELECT * FROM clips WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
+    html(ctx, views.shortsPage(ctx, { clips: withThumbs(clips), ffmpegOk: media.isAvailable() }));
+  },
+  { auth: true }
+);
+
+route(
+  'GET',
+  '/clips/:id/file',
+  (ctx) => {
+    const clip = userClip(ctx);
+    if (!clip || clip.status !== 'ready') return html(ctx, views.errorPage(ctx, 404, 'This Short does not exist.'), 404);
+    sendFile(ctx, clip.path, ctx.query.get('download') ? `${clip.title.replace(/[\\/:*?"<>|]/g, ' ')}.mp4` : null);
+  },
+  { auth: true }
+);
+
+// Kopira Short u red za upload i otvara formu „New video“ sa već izabranim fajlom.
+route(
+  'POST',
+  '/clips/:id/publish',
+  (ctx) => {
+    const clip = userClip(ctx);
+    if (!clip || clip.status !== 'ready' || !fs.existsSync(clip.path)) {
+      flash(ctx, 'bad', 'This Short is not ready or its file is missing.');
+      return redirect(ctx, '/shorts');
+    }
+    const id = sec.randomId();
+    const dest = path.join(cfg.dataDir, 'uploads', `${id}.mp4`);
+    fs.copyFileSync(clip.path, dest);
+    db.prepare('INSERT INTO uploads (id, user_id, path, original_name, mime, size, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+      id,
+      ctx.user.id,
+      dest,
+      `${clip.title}.mp4`.slice(0, 255),
+      'video/mp4',
+      fs.statSync(dest).size,
+      db.now()
+    );
+    redirect(ctx, `/upload?${new URLSearchParams({ fileId: id, title: clip.title })}`);
+  },
+  { auth: true }
+);
+
+route(
+  'POST',
+  '/clips/:id/delete',
+  (ctx) => {
+    const clip = userClip(ctx);
+    const back = ctx.query.get('from') === 'recording' && clip && clip.recording_id ? `/recordings/${clip.recording_id}` : '/shorts';
+    if (!clip) return redirect(ctx, back);
+    if (clip.status === 'rendering') {
+      flash(ctx, 'bad', 'This Short is still being created. Wait for it to finish.');
+      return redirect(ctx, back);
+    }
+    fs.rm(clip.path, { force: true }, () => {});
+    fs.rm(studio.thumbPath('clip', clip.id), { force: true }, () => {});
+    db.prepare('DELETE FROM clips WHERE id=?').run(clip.id);
+    flash(ctx, 'ok', 'The Short has been deleted.');
+    redirect(ctx, back);
+  },
+  { auth: true }
+);
+
+// Stanje poslova za osvježavanje stranica bez ponovnog učitavanja.
+route(
+  'GET',
+  '/api/studio/status',
+  (ctx) => {
+    const recId = Number(ctx.query.get('recording')) || null;
+    const recs = recId
+      ? db.prepare('SELECT id, status, progress FROM recordings WHERE id=? AND user_id=? AND hidden=0').all(recId, ctx.user.id)
+      : db.prepare('SELECT id, status, progress FROM recordings WHERE user_id=? AND hidden=0').all(ctx.user.id);
+    const clips = db.prepare('SELECT id, status, progress FROM clips WHERE user_id=?').all(ctx.user.id);
+    json(ctx, {
+      items: [
+        ...recs.map((r) => ({ key: `rec:${r.id}`, status: r.status, progress: r.progress })),
+        ...clips.map((c) => ({ key: `clip:${c.id}`, status: c.status, progress: c.progress })),
+      ],
+    });
+  },
+  { auth: true }
+);
+
 // ── Javne stranice ────────────────────────────────────────
 route('GET', '/privacy', (ctx) => html(ctx, views.privacyPage(ctx)));
 route('GET', '/terms', (ctx) => html(ctx, views.termsPage(ctx)));
@@ -524,7 +817,9 @@ server.listen(cfg.port, () => {
   if (!yt.isConfigured()) console.log('  ⚠ GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET are not set in .env');
   if (!cfg.ytAudited) console.log('  ⚠ Project is not audited: YouTube will lock videos as private.');
   console.log(`  OAuth redirect URI: ${yt.redirectUri()}\n`);
+  if (!media.isAvailable()) console.log('  ⚠ ffmpeg was not found: recordings cannot be analyzed or cut into Shorts.\n');
   worker.start();
+  studio.start();
 });
 
 function shutdown() {

@@ -32,11 +32,24 @@ if (!/^[0-9a-f]{64}$/i.test(env.ENCRYPTION_KEY || '')) {
   process.exit(1);
 }
 
-const baseUrl = (env.BASE_URL || `http://localhost:${env.PORT || 3000}`).replace(/\/+$/, '');
+// winget dodaje ffmpeg u PATH tek za programe pokrenute nakon instalacije,
+// pa se provjerava i njegov folder sa prečicama.
+function findTool(name, override) {
+  if (override) return override;
+  const linked = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'Microsoft', 'WinGet', 'Links', `${name}.exe`) : '';
+  return linked && fs.existsSync(linked) ? linked : name;
+}
+
+const baseUrl =(env.BASE_URL || `http://localhost:${env.PORT || 3000}`).replace(/\/+$/, '');
 
 module.exports = {
   root: ROOT,
   dataDir: path.join(ROOT, 'data'),
+  recordingsDir: path.resolve(ROOT, env.RECORDINGS_DIR || 'data/recordings'),
+  shortsDir: path.join(ROOT, 'data', 'shorts'),
+  thumbsDir: path.join(ROOT, 'data', 'thumbs'),
+  ffmpeg: findTool('ffmpeg', env.FFMPEG_PATH),
+  ffprobe: findTool('ffprobe', env.FFPROBE_PATH),
   port: Number(env.PORT || 3000),
   baseUrl,
   secureCookies: baseUrl.startsWith('https://'),

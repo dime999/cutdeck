@@ -2,6 +2,7 @@
 // HTML šabloni. Sve vrijednosti od korisnika prolaze kroz h() (escape).
 const cfg = require('./lib/config');
 const { CATEGORIES } = require('./lib/youtube');
+const { LAYOUTS } = require('./lib/media');
 
 const h = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -31,7 +32,7 @@ function layout(ctx, title, body) {
   <a class="brand" href="/">${h(cfg.appName)}</a>
   ${
     user
-      ? `<nav>${nav('/upload', 'New video')}${nav('/dashboard', 'Posts')}${nav('/accounts', 'Channels')}</nav>
+      ? `<nav>${nav('/upload', 'New video')}${nav('/dashboard', 'Posts')}${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}${nav('/accounts', 'Channels')}</nav>
          <form method="post" action="/logout" class="logout"><span class="who">${h(user.name)}</span><button class="link">Log out</button></form>`
       : ''
   }
@@ -137,7 +138,7 @@ ${
 }
 
 // ── Novi video ────────────────────────────────────────────
-function uploadPage(ctx, { accounts }) {
+function uploadPage(ctx, { accounts, preset = null, title = '' }) {
   const active = accounts.filter((a) => a.status === 'active');
   const channelList = active
     .map(
@@ -170,14 +171,19 @@ ${auditBanner}
 <form id="upload-form" class="grid" novalidate>
   <section class="card">
     <h2>1. Video</h2>
-    <label class="drop" id="drop">
-      <input type="file" name="file" id="file" accept="video/*" required>
-      <span id="drop-text"><strong>Choose a video</strong> or drag it here</span>
+    <label class="drop${preset ? ' has-file' : ''}" id="drop">
+      <input type="file" name="file" id="file" accept="video/*"${preset ? '' : ' required'}>
+      <span id="drop-text">${
+        preset
+          ? `<strong>${h(preset.original_name)}</strong> · ${fmtSize(preset.size)}`
+          : '<strong>Choose a video</strong> or drag it here'
+      }</span>
     </label>
+    ${preset ? `<input type="hidden" id="preset-file" value="${h(preset.id)}">` : ''}
 
     <h2>2. Details</h2>
     <label>Title <span class="counter" data-for="title" data-max="100"></span>
-      <input name="title" id="title" maxlength="100" required>
+      <input name="title" id="title" maxlength="100" value="${h(preset ? title : '')}" required>
     </label>
     <label>Description <span class="counter" data-for="description" data-max="5000"></span>
       <textarea name="description" id="description" rows="6" maxlength="5000"></textarea>
@@ -306,6 +312,247 @@ ${active ? '<div data-autorefresh="4000" hidden></div>' : ''}`
   );
 }
 
+// ── Snimci i Shorts ───────────────────────────────────────
+const REC_STATUS = {
+  pending: ['Waiting for analysis', 'muted'],
+  analyzing: ['Analyzing', 'info'],
+  ready: ['Ready', 'ok'],
+  failed: ['Analysis failed', 'bad'],
+};
+function fmtTime(seconds) {
+  const s = Math.floor(seconds);
+  const mmss = `${String(Math.floor((s % 3600) / 60)).padStart(s >= 3600 ? 2 : 1, '0')}:${String(s % 60).padStart(2, '0')}`;
+  return s >= 3600 ? `${Math.floor(s / 3600)}:${mmss}` : mmss;
+}
+
+const progressBar = (pct) =>
+  `<div class="progress small"><div class="bar" style="width:${pct}%"></div><span class="label">${pct}%</span></div>`;
+
+const ffmpegNotice = (ok) =>
+  ok
+    ? ''
+    : `<div class="notice warn"><strong>ffmpeg is not installed.</strong> The app needs it to analyze recordings and cut Shorts. Install it (on Windows: <code>winget install Gyan.FFmpeg</code>), then restart the app.</div>`;
+
+// Element koji uključuje osvježavanje stanja dok neki posao traje.
+const studioPoll = (busy, recordingId = '') => (busy ? `<div data-studio-poll="${recordingId}" hidden></div>` : '');
+
+const meta = (...parts) => `<p class="meta">${parts.filter(Boolean).map((p) => `<span>${p}</span>`).join('')}</p>`;
+
+/**
+ * Vremenska traka snimka: stubići glasnoće, predloženi trenuci i već izrezani Shorts.
+ * U interaktivnoj varijanti trenuci su dugmad, a traka ima playhead i okvir izbora.
+ */
+function timeline(rec, moments, { clips = [], interactive = false } = {}) {
+  const wave = JSON.parse(rec.waveform || '[]');
+  const duration = rec.duration || 1;
+  const span = (from, to) => `left:${((from / duration) * 100).toFixed(3)}%;width:${(((to - from) / duration) * 100).toFixed(3)}%`;
+  const bars = wave.map((v, i) => `M${i} 100v-${Math.max(2, v)}h.72v${Math.max(2, v)}z`).join('');
+  const marks = moments
+    .map((m) => {
+      const range = `${fmtTime(m.start_s)} – ${fmtTime(m.end_s)}`;
+      return interactive
+        ? `<button type="button" class="tl-mark" style="${span(m.start_s, m.end_s)}" data-pick data-start="${m.start_s}" data-end="${m.end_s}" title="${range}" aria-label="Preview and use ${range}"></button>`
+        : `<span class="tl-mark" style="${span(m.start_s, m.end_s)}"></span>`;
+    })
+    .join('');
+  const made = clips
+    .filter((c) => c.status === 'ready')
+    .map((c) => `<span class="tl-made" style="${span(c.start_s, c.end_s)}" title="Short: ${h(c.title)}"></span>`)
+    .join('');
+  return `<div class="tl${interactive ? ' tl-live' : ''}"${interactive ? ` id="timeline" data-duration="${duration}"` : ''}>
+    <svg class="tl-wave" viewBox="0 0 ${Math.max(1, wave.length)} 100" preserveAspectRatio="none" aria-hidden="true"><path d="${bars}"/></svg>
+    ${marks}${made}
+    ${interactive ? '<span class="tl-selection" id="tl-selection" hidden></span><span class="tl-playhead" id="tl-playhead"></span>' : ''}
+  </div>`;
+}
+
+function shortTiles(clips, { from = '' } = {}) {
+  const tiles = clips
+    .map((c) => {
+      let frame;
+      if (c.status === 'ready') {
+        frame = `<a class="short-frame" href="/clips/${c.id}/file" target="_blank" rel="noopener" title="Watch “${h(c.title)}”">
+        <video muted loop playsinline preload="none"${c.hasThumb ? ` poster="/clips/${c.id}/thumb"` : ''} src="/clips/${c.id}/file"></video>
+        <span class="short-len">${fmtTime(c.end_s - c.start_s)}</span>
+      </a>`;
+      } else if (c.status === 'failed') {
+        frame = `<div class="short-frame is-failed"><p>${h(c.error || 'This Short could not be created.')}</p></div>`;
+      } else {
+        frame = `<div class="short-frame is-busy"><p>${c.status === 'rendering' ? 'Creating…' : 'Waiting its turn'}</p>${c.status === 'rendering' ? progressBar(c.progress) : ''}</div>`;
+      }
+      return `<li class="short" data-poll-key="clip:${c.id}" data-state="${h(c.status)}">
+      ${frame}
+      <strong class="short-title">${h(c.title)}</strong>
+      ${meta(`${h(c.recording_name)} at ${fmtTime(c.start_s)}`, c.size ? fmtSize(c.size) : '')}
+      <div class="short-actions">
+        ${
+          c.status === 'ready'
+            ? `<form method="post" action="/clips/${c.id}/publish"><button class="primary">Publish</button></form>
+               <a class="button" href="/clips/${c.id}/file?download=1">Download</a>`
+            : ''
+        }
+        ${
+          c.status === 'rendering'
+            ? ''
+            : `<form method="post" action="/clips/${c.id}/delete${from ? `?from=${from}` : ''}" data-confirm="Delete the Short “${h(c.title)}”? Its video file will be deleted too."><button class="danger-outline">Delete</button></form>`
+        }
+      </div>
+    </li>`;
+    })
+    .join('');
+  return `<ul class="shorts">${tiles}</ul>`;
+}
+
+function recordingsPage(ctx, { recordings, ffmpegOk, folder }) {
+  const rows = recordings
+    .map((r) => {
+      const [label, cls] = REC_STATUS[r.status] || [r.status, 'muted'];
+      let state;
+      if (r.status === 'ready') {
+        state = timeline(r, r.moments);
+      } else if (r.status === 'failed') {
+        state = `<p class="small error">${h(r.error || 'The analysis failed.')}</p>`;
+      } else {
+        state = `<p class="small muted">${r.status === 'analyzing' ? 'Listening for the loudest moments…' : 'Waiting to be analyzed.'}</p>${r.status === 'analyzing' ? progressBar(r.progress) : ''}`;
+      }
+      const found = r.moments.length === 1 ? '1 loud moment found' : `${r.moments.length} loud moments found`;
+      return `<li class="rec" data-poll-key="rec:${r.id}" data-state="${h(r.status)}">
+      <a class="rec-thumb" href="/recordings/${r.id}" tabindex="-1" aria-hidden="true">
+        ${r.hasThumb ? `<img src="/recordings/${r.id}/thumb" alt="" loading="lazy">` : ''}
+        ${r.duration ? `<span class="rec-len">${fmtTime(r.duration)}</span>` : ''}
+      </a>
+      <div class="rec-body">
+        <div class="rec-head">
+          <a class="rec-title" href="/recordings/${r.id}">${h(r.name)}</a>
+          ${r.status === 'ready' ? '' : `<span class="chip ${cls}">${label}</span>`}
+          ${
+            r.status === 'analyzing'
+              ? ''
+              : `<form method="post" action="/recordings/${r.id}/remove" data-confirm="Remove “${h(r.name)}” from the list? The file stays on disk."><button class="danger-outline">Remove</button></form>`
+          }
+        </div>
+        ${meta(
+          r.status === 'ready' ? found : '',
+          r.width ? `${r.width}×${r.height}` : '',
+          fmtSize(r.size),
+          `added <time data-local="${h(r.created_at)}">${h(r.created_at)}</time>`
+        )}
+        ${state}
+      </div>
+    </li>`;
+    })
+    .join('');
+  const busy = recordings.some((r) => r.status === 'pending' || r.status === 'analyzing');
+
+  return layout(
+    ctx,
+    'Recordings',
+    `<div class="page-head">
+  <h1>Recordings</h1>
+  <form method="post" action="/recordings/scan"><button class="primary">Scan folder</button></form>
+</div>
+${ffmpegNotice(ffmpegOk)}
+<div id="live-recordings" data-live>
+${
+  recordings.length
+    ? `<ul class="recs">${rows}</ul>`
+    : `<div class="empty">Copy a gameplay recording into the folder below, then select “Scan folder”.</div>`
+}
+${studioPoll(busy && ffmpegOk)}
+</div>
+<p class="folder-hint">Recordings folder: <code>${h(folder)}</code>. Subfolders are scanned too. Highlighted ranges on each timeline are the loudest 30 seconds of the recording.</p>`
+  );
+}
+
+function recordingPage(ctx, { rec, moments, clips, ffmpegOk }) {
+  const [label, cls] = REC_STATUS[rec.status] || [rec.status, 'muted'];
+  let analysis;
+  if (rec.status === 'pending' || rec.status === 'analyzing') {
+    analysis = `<p class="muted">Listening to the recording to find its loudest moments…</p>${progressBar(rec.progress)}`;
+  } else if (rec.status === 'failed') {
+    analysis = `<p class="error">${h(rec.error || 'The analysis failed.')}</p>
+<form method="post" action="/recordings/${rec.id}/analyze"><button>Analyze again</button></form>`;
+  } else {
+    const quarter = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span>${fmtTime(rec.duration * f)}</span>`).join('');
+    analysis = `${timeline(rec, moments, { clips, interactive: true })}
+<div class="tl-scale" aria-hidden="true">${quarter}</div>
+${
+  moments.length
+    ? `<p class="small muted">Highlighted ranges are the loudest moments. Select one to watch it and load it into the form.</p>
+<ul class="moments">${moments
+        .map(
+          (m) =>
+            `<li><button type="button" class="moment" data-pick data-start="${m.start_s}" data-end="${m.end_s}" title="Loudness ${m.score}% of the loudest moment">${fmtTime(m.start_s)} – ${fmtTime(m.end_s)}</button></li>`
+        )
+        .join('')}</ul>`
+    : `<p class="small muted">${h(rec.error || 'No moment stands out in this recording. Play it and set the start and end yourself.')}</p>`
+}`;
+  }
+  const busy = rec.status === 'pending' || rec.status === 'analyzing' || clips.some((c) => c.status === 'pending' || c.status === 'rendering');
+
+  return layout(
+    ctx,
+    rec.name,
+    `<div class="page-head">
+  <h1>${h(rec.name)}</h1>
+  <a class="button" href="/recordings">All recordings</a>
+</div>
+${ffmpegNotice(ffmpegOk)}
+<div class="grid">
+  <section class="card">
+    <video class="player" id="player" src="/recordings/${rec.id}/file"${rec.hasThumb ? ` poster="/recordings/${rec.id}/thumb"` : ''} controls preload="metadata"></video>
+    <div id="live-moments" data-live data-poll-key="rec:${rec.id}" data-state="${h(rec.status)}">
+      ${rec.status === 'ready' ? '' : `<p><span class="chip ${cls}">${label}</span></p>`}
+      ${analysis}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Create a Short</h2>
+    <form method="post" action="/recordings/${rec.id}/clips" class="stack">
+      <div class="row">
+        <label>Start<input name="start" id="clip-start" placeholder="12:34" required autocomplete="off"></label>
+        <button type="button" data-set="clip-start">Set from player</button>
+      </div>
+      <div class="row">
+        <label>End<input name="end" id="clip-end" placeholder="13:04" required autocomplete="off"></label>
+        <button type="button" data-set="clip-end">Set from player</button>
+      </div>
+      <label>Layout
+        <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
+      </label>
+      <label>Title <span class="muted">(optional)</span><input name="title" maxlength="100"></label>
+      <p class="muted small">3 to 180 seconds. The result is a vertical 1080×1920 video.</p>
+      <button class="primary big">Create Short</button>
+    </form>
+  </section>
+</div>
+
+<div id="live-clips" data-live>
+  <h2>Shorts from this recording</h2>
+  ${clips.length ? shortTiles(clips, { from: 'recording' }) : '<div class="empty">Pick a moment above and select “Create Short”.</div>'}
+  ${studioPoll(busy && ffmpegOk, rec.id)}
+</div>`
+  );
+}
+
+function shortsPage(ctx, { clips, ffmpegOk }) {
+  const busy = clips.some((c) => c.status === 'pending' || c.status === 'rendering');
+  return layout(
+    ctx,
+    'Shorts',
+    `<div class="page-head">
+  <h1>Shorts</h1>
+  <a class="button primary" href="/recordings">Create from a recording</a>
+</div>
+${ffmpegNotice(ffmpegOk)}
+<div id="live-clips" data-live>
+${clips.length ? shortTiles(clips) : '<div class="empty">Open a recording, pick a moment and create your first Short.</div>'}
+${studioPoll(busy && ffmpegOk)}
+</div>`
+  );
+}
+
 // ── Pravne stranice (trebaju za Google audit) ──────────────
 function privacyPage(ctx) {
   const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the app administrator';
@@ -381,4 +628,18 @@ function errorPage(ctx, status, message) {
   );
 }
 
-module.exports = { h, loginPage, registerPage, accountsPage, uploadPage, dashboardPage, privacyPage, termsPage, errorPage };
+module.exports = {
+  h,
+  fmtTime,
+  loginPage,
+  registerPage,
+  accountsPage,
+  uploadPage,
+  dashboardPage,
+  recordingsPage,
+  recordingPage,
+  shortsPage,
+  privacyPage,
+  termsPage,
+  errorPage,
+};

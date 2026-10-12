@@ -91,10 +91,24 @@ Aplikacija već ima sve što Google traži od samog proizvoda:
    Bitno je da navedeš **isti Google Cloud projekat** čiji Client ID koristi aplikacija.
 4. Kad stigne odobrenje, u `.env` postavi `YT_PROJECT_AUDITED=true` i ponovo pokreni aplikaciju.
 
+## Shorts iz snimaka gameplaya
+
+Aplikacija iz dugog snimka predlaže najglasnije trenutke i reže ih u vertikalne Shorts (1080×1920).
+
+1. Instaliraj **ffmpeg**. Na Windowsu u terminalu kucaj `winget install Gyan.FFmpeg`, pa ponovo pokreni aplikaciju.
+2. Kopiraj snimke u folder `data/recordings` (može i u podfoldere). Drugi folder možeš zadati u `.env` kao `RECORDINGS_DIR`.
+3. Na stranici **Recordings** klikni **Scan folder**. Aplikacija presluša svaki snimak i predloži do 8 trenutaka od 30 sekundi.
+4. Otvori snimak, klikni **Preview** da pogledaš prijedlog i **Use** da ga preuzmeš u formu. Početak i kraj možeš postaviti i ručno, iz playera.
+5. Izaberi raspored (cijeli kadar na zamućenoj pozadini ili izrez sredine, lijeve ili desne strane) i klikni **Create Short**.
+6. Gotov Short je na stranici **Shorts**: možeš ga pogledati, skinuti ili poslati na objavu dugmetom **Publish**.
+
+Prijedlozi se zasnivaju samo na glasnoći zvuka, pa ih uvijek pregledaj prije rezanja. Uklanjanje snimka sa liste ne briše fajl sa diska.
+
 ## Gdje su podaci
 
 - `data/app.db` je baza (korisnici, kanali, objave).
 - `data/uploads/` su videi koji čekaju objavu. Automatski se brišu nakon uspješne objave na svim kanalima.
+- `data/recordings/` su tvoji snimci gameplaya, a `data/shorts/` izrezani Shorts.
 - `.env` sadrži podešavanja i tajne ključeve.
 
 ## Struktura koda
@@ -104,6 +118,8 @@ src/server.js        rute i HTTP server
 src/views.js         HTML stranice
 src/lib/youtube.js   OAuth i resumable upload na YouTube
 src/lib/worker.js    pozadinski red poslova, ponovni pokušaji i kvota
+src/lib/media.js     ffmpeg: analiza zvuka, prijedlozi trenutaka i rezanje u 9:16
+src/lib/studio.js    skeniranje foldera sa snimcima i red poslova za analizu i rezanje
 src/lib/db.js        SQLite šema (ugrađeni node:sqlite)
 src/lib/security.js  šifrovanje tokena, lozinke, sesija
 public/              CSS i JavaScript za preglednik

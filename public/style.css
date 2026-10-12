@@ -176,6 +176,59 @@ p.error { background: var(--bad-bg); padding: 0.65rem 0.85rem; border-radius: 8p
 .progress.small { height: 18px; margin: 0.35rem 0 0; max-width: 320px; }
 .progress.small .label { line-height: 18px; font-size: 0.75rem; }
 
+.player { display: block; width: 100%; max-height: 60vh; background: #000; border-radius: 8px; margin-bottom: 1rem; }
+.row { display: flex; gap: 0.5rem; align-items: flex-end; }
+.row label { flex: 1; }
+
+/* ── Recordings and Shorts ── */
+.meta { display: flex; flex-wrap: wrap; gap: 0.1rem 1rem; margin: 0.25rem 0 0; color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.folder-hint { margin: 1.25rem 0 0; max-width: 70ch; color: var(--muted); font-size: 0.88rem; }
+
+.recs { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.rec { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 1.1rem; padding: 0.9rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.rec-thumb { position: relative; display: block; aspect-ratio: 16 / 9; align-self: start; overflow: hidden; border-radius: 6px; background: #000; }
+.rec-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.rec-len, .short-len { position: absolute; right: 6px; bottom: 6px; padding: 0.05rem 0.4rem; border-radius: 4px; background: rgb(0 0 0 / 75%); color: #fff; font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rec-body { display: flex; flex-direction: column; min-width: 0; }
+.rec-head { display: flex; align-items: flex-start; gap: 0.75rem; }
+.rec-head form { margin: 0; }
+.rec-title { flex: 1; min-width: 0; color: var(--text); font-size: 1.05rem; font-weight: 700; text-decoration: none; overflow-wrap: anywhere; }
+.rec-title:hover { text-decoration: underline; }
+.rec .tl { margin-top: auto; }
+.rec .meta { margin-bottom: 0.75rem; }
+@media (max-width: 640px) { .rec { grid-template-columns: minmax(0, 1fr); } }
+
+/* Vremenska traka: stubići glasnoće, a preko njih predloženi trenuci */
+.tl { position: relative; height: 44px; overflow: hidden; border-radius: 6px; background: var(--bg); }
+.tl-wave { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--muted); opacity: 0.5; }
+.tl-mark { position: absolute; top: 0; bottom: 0; min-width: 5px; padding: 0; border: 0; border-top: 3px solid var(--accent); border-radius: 0; background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.tl-made { position: absolute; bottom: 0; height: 4px; min-width: 5px; background: var(--ok); }
+.tl-live { height: 96px; cursor: pointer; }
+.tl-live .tl-mark { cursor: pointer; }
+.tl-live .tl-mark:hover, .tl-live .tl-mark:focus-visible { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 60%, transparent); outline: 0; }
+.tl-selection { position: absolute; top: 0; bottom: 0; border: 2px solid var(--text); border-radius: 3px; pointer-events: none; }
+.tl-playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--text); pointer-events: none; }
+.tl-scale { display: flex; justify-content: space-between; margin-top: 0.25rem; color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.moments { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0; padding: 0; list-style: none; }
+.moment { font-variant-numeric: tabular-nums; }
+.moment.is-picked { border-color: var(--accent); color: var(--accent); }
+
+/* Shorts su vertikalni, pa se prikazuju kao pločice 9:16 */
+.shorts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1.5rem 1rem; margin: 0; padding: 0; list-style: none; }
+.short { display: flex; flex-direction: column; min-width: 0; }
+.short-frame { position: relative; display: block; aspect-ratio: 9 / 16; overflow: hidden; border-radius: 12px; background: #000; }
+.short-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.short-frame.is-busy, .short-frame.is-failed { display: grid; place-content: center; justify-items: center; gap: 0.5rem; padding: 1rem; border: 1px dashed var(--border); background: var(--surface); color: var(--muted); font-size: 0.88rem; text-align: center; }
+.short-frame.is-failed { color: var(--bad); overflow-wrap: anywhere; }
+.short-frame p { margin: 0; }
+.short-frame .progress { width: 110px; margin: 0; }
+.short-title { margin-top: 0.6rem; line-height: 1.3; overflow-wrap: anywhere; }
+.short-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
+.short-actions form { margin: 0; }
+.short-actions form:last-child { margin-left: auto; }
+.short-actions button, .short-actions .button { padding: 0.35rem 0.7rem; font-size: 0.85rem; }
+.short-actions .danger-outline { border-color: transparent; background: none; }
+
 .prose { max-width: 760px; margin: 0 auto; }
 .prose h2 { margin-top: 1.6rem; }
 .prose li { margin-bottom: 0.35rem; }
