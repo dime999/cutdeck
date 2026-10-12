@@ -29,6 +29,8 @@ module.exports = {
   shortsDir: path.join(ROOT, 'data', 'shorts'),
   thumbsDir: path.join(ROOT, 'data', 'thumbs'),
   thumbnailsDir: path.join(ROOT, 'data', 'thumbnails'),
+  bumpersDir: path.join(ROOT, 'data', 'bumpers'),
+  videosDir: path.join(ROOT, 'data', 'videos'),
   ffmpeg: findTool('ffmpeg', env.FFMPEG_PATH),
   ffprobe: findTool('ffprobe', env.FFPROBE_PATH),
   // Nema prijave, pa se aplikacija javlja samo na ovom računaru.

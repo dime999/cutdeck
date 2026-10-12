@@ -24,7 +24,7 @@ function layout(ctx, title, body) {
 <body>
 <header class="top">
   <a class="brand" href="/">${h(cfg.appName)}</a>
-  <nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}${nav('/thumbnails', 'Thumbnails')}</nav>
+  <nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}${nav('/thumbnails', 'Thumbnails')}${nav('/videos', 'Videos')}${nav('/bumpers', 'Intros and outros')}</nav>
 </header>
 <main>
 ${flash}
@@ -40,7 +40,8 @@ ${body}
 
 function fmtSize(bytes) {
   if (bytes > 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
 // ── Snimci i Shorts ───────────────────────────────────────
@@ -125,7 +126,8 @@ function shortTiles(clips, { from = '' } = {}) {
       <div class="short-actions">
         ${
           c.status === 'ready'
-            ? `<a class="button primary" href="/clips/${c.id}/file?download=1">Download</a>`
+            ? `<a class="button primary" href="/clips/${c.id}/file?download=1">Download</a>
+               <a class="button" href="/videos/new?clip=${c.id}">Add intro and outro</a>`
             : ''
         }
         ${
@@ -250,7 +252,8 @@ ${
     `<div class="page-head">
   <h1>${h(rec.name)}</h1>
   <div class="head-actions">
-    ${rec.status === 'ready' ? `<a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">Create thumbnail</a>` : ''}
+    ${rec.status === 'ready' ? `<a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">Create thumbnail</a>
+    <a class="button" href="/videos/new?recording=${rec.id}">Add intro and outro</a>` : ''}
     <a class="button" href="/recordings">All recordings</a>
   </div>
 </div>
@@ -412,6 +415,126 @@ function thumbnailEditorPage(ctx, { rec, moments, time }) {
   );
 }
 
+// ── Intro, outro i gotovi videi ───────────────────────────
+function bumpersPage(ctx, { bumpers, ffmpegOk }) {
+  const tiles = bumpers
+    .map(
+      (b) => `<li class="thumb">
+      <a class="thumb-frame" href="/bumpers/${b.id}/file" target="_blank" rel="noopener" title="Watch “${h(b.name)}”">
+        ${b.hasThumb ? `<img src="/bumpers/${b.id}/thumb" alt="" loading="lazy">` : ''}
+        <span class="rec-len">${fmtTime(b.duration)}</span>
+      </a>
+      <strong class="short-title">${h(b.name)}</strong>
+      ${meta(`${b.width}×${b.height}`, fmtSize(b.size), b.has_audio ? '' : 'no sound')}
+      <div class="short-actions">
+        <form method="post" action="/bumpers/${b.id}/delete" data-confirm="Delete “${h(b.name)}”? Videos already created with it stay as they are."><button class="danger-outline">Delete</button></form>
+      </div>
+    </li>`
+    )
+    .join('');
+  return layout(
+    ctx,
+    'Intros and outros',
+    `<div class="page-head">
+  <h1>Intros and outros</h1>
+</div>
+${ffmpegNotice(ffmpegOk)}
+<section class="card">
+  <h2>Add a clip</h2>
+  <form id="bumper-form" class="stack">
+    <label>Video file<input type="file" id="bumper-file" accept="video/*" required></label>
+    <label>Name <span class="muted">(optional)</span><input id="bumper-name" maxlength="60" placeholder="Channel intro"></label>
+    <p class="error" id="bumper-error" hidden></p>
+    <div class="progress" id="bumper-progress" hidden><div class="bar"></div><span class="label"></span></div>
+    <div><button class="primary">Add clip</button></div>
+  </form>
+</section>
+${
+  bumpers.length
+    ? `<ul class="thumbs">${tiles}</ul>`
+    : '<div class="empty">Add the intro and outro clips you made for your channel. Any clip can be used at the start or at the end of a video.</div>'
+}`
+  );
+}
+
+function videoNewPage(ctx, { source, bumpers }) {
+  const options = bumpers.map((b) => `<option value="${b.id}">${h(b.name)} (${fmtTime(b.duration)})</option>`).join('');
+  return layout(
+    ctx,
+    'Add intro and outro',
+    `<div class="page-head">
+  <h1>Add intro and outro</h1>
+  <a class="button" href="${source.back}">Back</a>
+</div>
+<section class="card form-card">
+  <p class="form-source"><strong>${h(source.name)}</strong></p>
+  ${meta(fmtTime(source.duration), `${source.width}×${source.height}`, source.kind === 'clip' ? 'Short' : 'Recording')}
+  ${
+    bumpers.length
+      ? `<form method="post" action="/videos" class="stack">
+    <input type="hidden" name="source" value="${source.kind}:${source.id}">
+    <label>Intro<select name="intro"><option value="">No intro</option>${options}</select></label>
+    <label>Outro<select name="outro"><option value="">No outro</option>${options}</select></label>
+    <label>Title<input name="title" maxlength="100" value="${h(source.name)}"></label>
+    <p class="muted small">The result keeps the size of this video. A clip with a different shape is fitted into the frame with black bars. The whole video is encoded again, so a long recording takes a while.</p>
+    <button class="primary big">Create video</button>
+  </form>`
+      : '<div class="empty">Add an intro or outro clip first. <a class="button primary" href="/bumpers">Go to Intros and outros</a></div>'
+  }
+</section>`
+  );
+}
+
+function videosPage(ctx, { videos, ffmpegOk }) {
+  const tiles = videos
+    .map((v) => {
+      const parts = JSON.parse(v.parts).map((p) => h(p.name)).join(' + ');
+      let frame;
+      if (v.status === 'ready') {
+        frame = `<a class="thumb-frame" href="/videos/${v.id}/file" target="_blank" rel="noopener" title="Watch “${h(v.title)}”">
+        ${v.hasThumb ? `<img class="fit" src="/videos/${v.id}/thumb" alt="" loading="lazy">` : ''}
+        <span class="rec-len">${fmtTime(v.duration)}</span>
+      </a>`;
+      } else if (v.status === 'failed') {
+        frame = `<div class="thumb-frame is-failed"><p>${h(v.error || 'This video could not be created.')}</p></div>`;
+      } else {
+        frame = `<div class="thumb-frame is-busy"><p>${v.status === 'rendering' ? 'Creating…' : 'Waiting its turn'}</p>${v.status === 'rendering' ? progressBar(v.progress) : ''}</div>`;
+      }
+      let actions;
+      if (v.status === 'ready') actions = `<a class="button primary" href="/videos/${v.id}/file?download=1">Download</a>`;
+      else if (v.status === 'rendering') actions = `<form method="post" action="/videos/${v.id}/cancel"><button>Cancel</button></form>`;
+      else actions = '';
+      return `<li class="thumb" data-poll-key="video:${v.id}" data-state="${h(v.status)}">
+      ${frame}
+      <strong class="short-title">${h(v.title)}</strong>
+      ${meta(parts, v.size ? fmtSize(v.size) : '', v.width ? `${v.width}×${v.height}` : '')}
+      <div class="short-actions">
+        ${actions}
+        ${
+          v.status === 'rendering'
+            ? ''
+            : `<form method="post" action="/videos/${v.id}/delete" data-confirm="Delete the video “${h(v.title)}”? Its file will be deleted too."><button class="danger-outline">Delete</button></form>`
+        }
+      </div>
+    </li>`;
+    })
+    .join('');
+  const busy = videos.some((v) => v.status === 'pending' || v.status === 'rendering');
+  return layout(
+    ctx,
+    'Videos',
+    `<div class="page-head">
+  <h1>Videos</h1>
+  <a class="button" href="/bumpers">Intros and outros</a>
+</div>
+${ffmpegNotice(ffmpegOk)}
+<div id="live-videos" data-live>
+${videos.length ? `<ul class="thumbs">${tiles}</ul>` : '<div class="empty">Open a recording or a Short and select “Add intro and outro” to create a finished video.</div>'}
+${studioPoll(busy && ffmpegOk)}
+</div>`
+  );
+}
+
 // ── Pravne stranice ───────────────────────────────────────
 function privacyPage(ctx) {
   const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the person who runs this copy of the app';
@@ -427,7 +550,7 @@ function privacyPage(ctx) {
 <h2>What the app stores</h2>
 <ul>
   <li><strong>Your recordings:</strong> the video files you copy into the recordings folder, plus what the app works out from them: length, resolution, loudness over time and a thumbnail.</li>
-  <li><strong>What you create:</strong> the Shorts you cut, the thumbnails you make and the titles you give them.</li>
+  <li><strong>What you create:</strong> the Shorts you cut, the thumbnails and videos you make, your intro and outro clips, and the titles you give them.</li>
 </ul>
 
 <h2>How the data is used</h2>
@@ -482,6 +605,9 @@ module.exports = {
   shortsPage,
   thumbnailsPage,
   thumbnailEditorPage,
+  bumpersPage,
+  videoNewPage,
+  videosPage,
   privacyPage,
   termsPage,
   errorPage,

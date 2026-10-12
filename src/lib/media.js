@@ -24,9 +24,9 @@ function isAvailable() {
   return available;
 }
 
-function run(bin, args, onStdout) {
+function run(bin, args, onStdout, signal) {
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { windowsHide: true });
+    const child = spawn(bin, args, { windowsHide: true, signal });
     let errTail = '';
     child.stdout.on('data', (d) => onStdout && onStdout(d));
     child.stderr.on('data', (d) => (errTail = (errTail + d).slice(-2000)));
@@ -39,12 +39,12 @@ function run(bin, args, onStdout) {
   });
 }
 
-/** Vraća {duration, width, height, hasAudio}. */
+/** Vraća {duration, width, height, fps, hasAudio}. `fps` je razlomak kakav daje ffprobe, npr. "60000/1001". */
 async function probe(file) {
   const chunks = [];
   await run(
     cfg.ffprobe,
-    ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height', '-of', 'json', file],
+    ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height,avg_frame_rate', '-of', 'json', file],
     (d) => chunks.push(d)
   );
   const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
@@ -57,6 +57,7 @@ async function probe(file) {
     duration,
     width: video.width || null,
     height: video.height || null,
+    fps: /^[1-9]\d*\/[1-9]\d*$/.test(video.avg_frame_rate || '') ? video.avg_frame_rate : '30/1',
     hasAudio: streams.some((s) => s.codec_type === 'audio'),
   };
 }
@@ -170,12 +171,50 @@ function renderArgs({ input, output, start, duration, layout }) {
   ];
 }
 
+// ffmpeg uz -progress ispisuje dokle je stigao; ovo to pretvara u udio od ukupnog trajanja.
+const progressParser = (total, onProgress) => (chunk) => {
+  const m = /out_time_(?:us|ms)=(\d+)/.exec(chunk.toString('utf8'));
+  if (m) onProgress(Math.min(1, Number(m[1]) / 1e6 / total));
+};
+
 /** Reže dio snimka u vertikalni 1080×1920 MP4. */
 async function renderShort(job, onProgress) {
-  await run(cfg.ffmpeg, renderArgs(job), (chunk) => {
-    const m = /out_time_(?:us|ms)=(\d+)/.exec(chunk.toString('utf8'));
-    if (m) onProgress(Math.min(1, Number(m[1]) / 1e6 / job.duration));
-  });
+  await run(cfg.ffmpeg, renderArgs(job), progressParser(job.duration, onProgress));
 }
 
-module.exports = { LAYOUTS, isAvailable, probe, audioLevels, findMoments, waveform, thumbnail, renderArgs, renderShort };
+/**
+ * Argumenti za spajanje dijelova u jedan video. Svaki dio se uklapa u zadanu veličinu
+ * (sa crnim rubovima ako je drugačijeg oblika) i dobija isti broj sličica i isti format
+ * zvuka, jer ih concat filter inače ne može spojiti. Dio bez zvuka dobija tišinu.
+ */
+function joinArgs({ parts, output, width, height, fps }) {
+  const inputs = [];
+  const filters = [];
+  parts.forEach((p, i) => {
+    inputs.push('-i', p.path);
+    filters.push(
+      `[${i}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps},format=yuv420p[v${i}]`,
+      p.hasAudio
+        ? `[${i}:a:0]aformat=sample_rates=48000:channel_layouts=stereo[a${i}]`
+        : `anullsrc=r=48000:cl=stereo,atrim=duration=${p.duration}[a${i}]`
+    );
+  });
+  filters.push(`${parts.map((_, i) => `[v${i}][a${i}]`).join('')}concat=n=${parts.length}:v=1:a=1[v][a]`);
+  return [
+    '-hide_banner', '-nostdin', '-v', 'error', '-y',
+    ...inputs,
+    '-filter_complex', filters.join(';'), '-map', '[v]', '-map', '[a]',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+    '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats', output,
+  ];
+}
+
+/** Spaja dijelove (npr. intro, glavni video, outro) u jedan MP4. `signal` prekida posao. */
+async function renderJoined(job, onProgress, signal) {
+  const total = job.parts.reduce((sum, p) => sum + p.duration, 0);
+  await run(cfg.ffmpeg, joinArgs(job), progressParser(total, onProgress), signal);
+}
+
+module.exports = { LAYOUTS, isAvailable, probe, audioLevels, findMoments, waveform, thumbnail, renderArgs, renderShort, joinArgs, renderJoined };

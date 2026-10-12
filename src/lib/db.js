@@ -11,7 +11,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const cfg = require('./config');
 
-for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir, cfg.thumbnailsDir]) {
+for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir, cfg.thumbnailsDir, cfg.bumpersDir, cfg.videosDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 const db = new DatabaseSync(path.join(cfg.dataDir, 'app.db'));
@@ -81,6 +81,37 @@ CREATE TABLE IF NOT EXISTS thumbnails (
   path           TEXT NOT NULL,
   size           INTEGER NOT NULL,
   created_at     TEXT NOT NULL
+);
+
+-- Intro i outro klipovi
+CREATE TABLE IF NOT EXISTS bumpers (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  path       TEXT NOT NULL,
+  size       INTEGER NOT NULL,
+  duration   REAL NOT NULL,
+  width      INTEGER,
+  height     INTEGER,
+  has_audio  INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- Gotovi videi složeni iz dijelova (intro + video + outro)
+CREATE TABLE IF NOT EXISTS exports (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL,
+  parts      TEXT NOT NULL,                    -- JSON: [{kind, id, name, main?}] redom kojim se spajaju
+  path       TEXT NOT NULL,
+  size       INTEGER NOT NULL DEFAULT 0,
+  duration   REAL,
+  width      INTEGER,
+  height     INTEGER,
+  status     TEXT NOT NULL DEFAULT 'pending', -- pending | rendering | ready | failed
+  progress   INTEGER NOT NULL DEFAULT 0,
+  error      TEXT,
+  created_at TEXT NOT NULL
 );
 `);
 

@@ -9,9 +9,10 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Predlaže najglasnije trenutke svakog snimka kao kandidate za Shorts.
 - Reže izabrani dio u vertikalni Short (1080×1920), sa cijelim kadrom na zamućenoj pozadini ili izrezom dijela slike.
 - Pravi thumbnail (JPG 1280×720) od kadra iz snimka, sa tekstom i doradom slike.
+- Dodaje intro i outro na cijeli snimak ili na Short i pravi gotov video.
 - Nema prijave: aplikacija je za jednog korisnika i dostupna je samo sa računara na kojem radi.
 
-**Šta je u planu:** dodavanje intra i outra, spajanje više videa u jedan.
+**Šta je u planu:** spajanje više videa u jedan.
 
 Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga sam kroz YouTube Studio.
 
@@ -54,11 +55,21 @@ Prijedlozi se zasnivaju samo na glasnoći zvuka, pa ih uvijek pregledaj prije re
 
 Spremljeni thumbnail se ne može naknadno uređivati; za izmjenu napravi novi.
 
+## Intro i outro
+
+1. Na stranici **Intros and outros** dodaj svoje intro i outro klipove (MP4, MOV, MKV ili WebM, do 1 GB). Isti klip može biti i intro i outro.
+2. Otvori snimak ili Short i klikni **Add intro and outro**.
+3. Izaberi intro, outro ili oboje, upiši naslov i klikni **Create video**.
+4. Gotov video je na stranici **Videos**, odakle ga skidaš dugmetom **Download**. Dok se pravi, možeš ga prekinuti dugmetom **Cancel**.
+
+Gotov video ima veličinu glavnog videa. Klip drugačijeg oblika (npr. vodoravni intro na vertikalnom Shortu) uklapa se u kadar sa crnim rubovima, a klip bez zvuka dobija tišinu. Cijeli video se kodira iznova, pa dug snimak traje.
+
 ## Gdje su podaci
 
-- `data/app.db` je baza (snimci, Shorts i thumbnailovi).
+- `data/app.db` je baza (snimci, Shorts, thumbnailovi, klipovi i gotovi videi).
 - `data/recordings/` su tvoji snimci gameplaya.
 - `data/shorts/` su izrezani Shorts, a `data/thumbnails/` thumbnailovi koje si napravio.
+- `data/bumpers/` su intro i outro klipovi, a `data/videos/` gotovi videi.
 - `data/thumbs/` su sličice za prikaz u aplikaciji.
 - `.env` sadrži podešavanja.
 
@@ -69,8 +80,8 @@ Folder `data/` i fajl `.env` nisu u gitu. Napravi im rezervnu kopiju ako ti je s
 ```
 src/server.js        rute i HTTP server
 src/views.js         HTML stranice
-src/lib/media.js     ffmpeg: analiza zvuka, prijedlozi trenutaka i rezanje u 9:16
-src/lib/studio.js    skeniranje foldera sa snimcima i red poslova za analizu i rezanje
+src/lib/media.js     ffmpeg: analiza zvuka, prijedlozi trenutaka, rezanje u 9:16 i spajanje dijelova
+src/lib/studio.js    skeniranje foldera sa snimcima i redovi poslova za analizu, rezanje i spajanje
 src/lib/db.js        SQLite šema (ugrađeni node:sqlite)
 public/              CSS i JavaScript za preglednik
 ```

@@ -60,6 +60,8 @@ function start() {
   db.prepare("UPDATE recordings SET status='pending', progress=0 WHERE status='analyzing' OR (status='ready' AND waveform IS NULL)").run();
   db.prepare("UPDATE clips SET status='pending', progress=0 WHERE status='rendering'").run();
   tick();
+  db.prepare("UPDATE exports SET status='pending', progress=0 WHERE status='rendering'").run();
+  tickExports();
 }
 
 function tick() {
@@ -138,4 +140,92 @@ async function renderClip(id) {
   }
 }
 
-module.exports = { MIN_CLIP, MAX_CLIP, thumbPath, scan, createClip, start, tick };
+// ── Intro/outro klipovi i gotovi videi ────────────────────
+async function addBumper(userId, file, name, size) {
+  const info = await media.probe(file);
+  const r = db
+    .prepare('INSERT INTO bumpers (user_id, name, path, size, duration, width, height, has_audio, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(userId, name, file, size, info.duration, info.width, info.height, info.hasAudio ? 1 : 0, db.now());
+  const id = Number(r.lastInsertRowid);
+  await media.thumbnail(file, thumbPath('bumper', id), Math.min(1, info.duration / 2), 480).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
+  return id;
+}
+
+/** `parts` je redoslijed dijelova: [{kind: 'bumper'|'recording'|'clip', id, name, main?}]. */
+function createExport(userId, { title, parts }) {
+  const file = path.join(cfg.videosDir, `${crypto.randomBytes(16).toString('hex')}.mp4`);
+  const r = db
+    .prepare('INSERT INTO exports (user_id, title, parts, path, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(userId, title, JSON.stringify(parts), file, db.now());
+  tickExports();
+  return Number(r.lastInsertRowid);
+}
+
+function partFile(part) {
+  const table = { bumper: 'bumpers', recording: 'recordings', clip: 'clips' }[part.kind];
+  const row = table ? db.prepare(`SELECT path FROM ${table} WHERE id=?`).get(part.id) : null;
+  return row && fs.existsSync(row.path) ? row.path : null;
+}
+
+// Spajanje dugog snimka može trajati dugo, pa ima svoju traku i ne zaustavlja rezanje Shortsa.
+let exporting = null; // { id, controller }
+function tickExports() {
+  if (exporting || !media.isAvailable()) return;
+  const next = db.prepare("SELECT id FROM exports WHERE status='pending' ORDER BY id LIMIT 1").get();
+  if (!next) return;
+  exporting = { id: next.id, controller: new AbortController() };
+  renderExport(next.id, exporting.controller.signal)
+    .catch((e) => console.error('[studio] unexpected error', e))
+    .finally(() => {
+      exporting = null;
+      setImmediate(tickExports);
+    });
+}
+
+/** Prekida video koji se upravo pravi. Vraća false ako taj video nije u toku. */
+function cancelExport(id) {
+  if (!exporting || exporting.id !== id) return false;
+  exporting.controller.abort();
+  return true;
+}
+
+async function renderExport(id, signal) {
+  const exp = db.prepare('SELECT * FROM exports WHERE id=?').get(id);
+  db.prepare("UPDATE exports SET status='rendering', progress=0, error=NULL WHERE id=?").run(id);
+  try {
+    const parts = [];
+    for (const part of JSON.parse(exp.parts)) {
+      const file = partFile(part);
+      if (!file) throw new Error(`“${part.name}” no longer exists on disk.`);
+      parts.push({ ...part, path: file, ...(await media.probe(file)) });
+    }
+    // Glavni dio određuje veličinu i broj sličica; libx264 traži parne dimenzije.
+    const main = parts.find((p) => p.main) || parts[0];
+    const even = (n) => n - (n % 2);
+    await media.renderJoined(
+      { parts, output: exp.path, width: even(main.width), height: even(main.height), fps: main.fps },
+      progressSetter('exports', id),
+      signal
+    );
+    const out = await media.probe(exp.path);
+    const mainStart = parts.slice(0, parts.indexOf(main)).reduce((sum, p) => sum + p.duration, 0);
+    await media
+      .thumbnail(exp.path, thumbPath('video', id), mainStart + Math.min(5, main.duration / 2), 480)
+      .catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
+    db.prepare("UPDATE exports SET status='ready', progress=100, size=?, duration=?, width=?, height=? WHERE id=?").run(
+      fs.statSync(exp.path).size,
+      out.duration,
+      out.width,
+      out.height,
+      id
+    );
+    console.log(`[studio] ✔ video "${exp.title}"`);
+  } catch (err) {
+    const message = signal.aborted ? 'Cancelled.' : err.message;
+    console.warn(`[studio] ✘ video "${exp.title}": ${message}`);
+    fs.rm(exp.path, { force: true }, () => {});
+    db.prepare("UPDATE exports SET status='failed', error=? WHERE id=?").run(message, id);
+  }
+}
+
+module.exports = { MIN_CLIP, MAX_CLIP, thumbPath, scan, createClip, addBumper, createExport, cancelExport, start, tick };

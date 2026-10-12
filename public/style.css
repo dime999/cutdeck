@@ -194,10 +194,10 @@ p.error { background: var(--bad-bg); padding: 0.65rem 0.85rem; border-radius: 8p
 .short { display: flex; flex-direction: column; min-width: 0; }
 .short-frame { position: relative; display: block; aspect-ratio: 9 / 16; overflow: hidden; border-radius: 12px; background: #000; }
 .short-frame video { display: block; width: 100%; height: 100%; object-fit: cover; }
-.short-frame.is-busy, .short-frame.is-failed { display: grid; place-content: center; justify-items: center; gap: 0.5rem; padding: 1rem; border: 1px dashed var(--border); background: var(--surface); color: var(--muted); font-size: 0.88rem; text-align: center; }
-.short-frame.is-failed { color: var(--bad); overflow-wrap: anywhere; }
-.short-frame p { margin: 0; }
-.short-frame .progress { width: 110px; margin: 0; }
+.short-frame.is-busy, .short-frame.is-failed, .thumb-frame.is-busy, .thumb-frame.is-failed { display: grid; place-content: center; justify-items: center; gap: 0.5rem; padding: 1rem; border: 1px dashed var(--border); background: var(--surface); color: var(--muted); font-size: 0.88rem; text-align: center; }
+.short-frame.is-failed, .thumb-frame.is-failed { color: var(--bad); overflow-wrap: anywhere; }
+.short-frame p, .thumb-frame p { margin: 0; }
+.short-frame .progress, .thumb-frame .progress { width: 110px; margin: 0; }
 .short-title { margin-top: 0.6rem; line-height: 1.3; overflow-wrap: anywhere; }
 .short-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.6rem; }
 .short-actions form { margin: 0; }
@@ -209,10 +209,15 @@ p.error { background: var(--bad-bg); padding: 0.65rem 0.85rem; border-radius: 8p
 .head-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.5rem 1rem; margin: 0; padding: 0; list-style: none; }
 .thumb { display: flex; flex-direction: column; min-width: 0; }
-.thumb-frame { display: block; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: #000; }
+.thumb-frame { position: relative; display: block; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; background: #000; }
 .thumb-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.thumb-frame img.fit { object-fit: contain; }
+.form-card { max-width: 560px; }
+.form-source { margin: 0; font-size: 1.05rem; }
+.form-card .meta { margin-bottom: 1.1rem; }
 .thumb-canvas { display: block; width: 100%; height: auto; margin-bottom: 0.6rem; border-radius: 8px; background: #000; cursor: move; touch-action: none; }
 .thumb-source { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+input[type=file] { display: block; margin-top: 0.35rem; font: inherit; font-weight: 400; }
 input[type=range] { padding: 0; border: 0; background: none; accent-color: var(--accent); }
 #thumb-time { margin: 0.5rem 0; }
 .check { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; }

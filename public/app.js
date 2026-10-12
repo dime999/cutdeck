@@ -498,6 +498,48 @@ if (thumbLink) {
   });
 }
 
+// ── Dodavanje intro/outro klipa ───────────────────────────
+const bumperForm = document.getElementById('bumper-form');
+if (bumperForm) {
+  const errorBox = document.getElementById('bumper-error');
+  const progress = document.getElementById('bumper-progress');
+  const button = bumperForm.querySelector('button');
+  bumperForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const file = document.getElementById('bumper-file').files[0];
+    if (!file) return;
+    errorBox.hidden = true;
+    button.disabled = true;
+    const fail = (message) => {
+      errorBox.textContent = message;
+      errorBox.hidden = false;
+      progress.hidden = true;
+      button.disabled = false;
+    };
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', '/api/bumpers');
+    xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
+    xhr.setRequestHeader('x-name', encodeURIComponent(document.getElementById('bumper-name').value));
+    xhr.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable) return;
+      const pct = Math.round((ev.loaded / ev.total) * 100);
+      progress.hidden = false;
+      progress.querySelector('.bar').style.width = `${pct}%`;
+      progress.querySelector('.label').textContent = pct < 100 ? `Copying the clip… ${pct}%` : 'Checking the clip…';
+    };
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {}
+      if (xhr.status === 200 && data.redirect) location.href = data.redirect;
+      else fail(data.error || `The clip could not be added (error ${xhr.status}).`);
+    };
+    xhr.onerror = () => fail('The clip could not be added because the app did not respond.');
+    xhr.send(file);
+  });
+}
+
 // Pregled Shorta dok je miš iznad njega
 document.addEventListener(
   'mouseenter',

@@ -3,6 +3,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { once } = require('node:events');
 
 const cfg = require('./lib/config');
 const db = require('./lib/db');
@@ -356,10 +357,12 @@ route(
       ? db.prepare('SELECT id, status, progress FROM recordings WHERE id=? AND user_id=? AND hidden=0').all(recId, ctx.user.id)
       : db.prepare('SELECT id, status, progress FROM recordings WHERE user_id=? AND hidden=0').all(ctx.user.id);
     const clips = db.prepare('SELECT id, status, progress FROM clips WHERE user_id=?').all(ctx.user.id);
+    const videos = db.prepare('SELECT id, status, progress FROM exports WHERE user_id=?').all(ctx.user.id);
     json(ctx, {
       items: [
         ...recs.map((r) => ({ key: `rec:${r.id}`, status: r.status, progress: r.progress })),
         ...clips.map((c) => ({ key: `clip:${c.id}`, status: c.status, progress: c.progress })),
+        ...videos.map((v) => ({ key: `video:${v.id}`, status: v.status, progress: v.progress })),
       ],
     });
   }
@@ -438,6 +441,170 @@ route('POST', '/thumbnails/:id/delete', (ctx) => {
     flash(ctx, 'ok', 'The thumbnail has been deleted.');
   }
   redirect(ctx, '/thumbnails');
+});
+
+// ── Rute: intro/outro klipovi ─────────────────────────────
+const BUMPER_EXT = /\.(mp4|mov|m4v|mkv|webm)$/i;
+const MAX_BUMPER_BYTES = 1024 ** 3;
+const userBumper = (ctx) => db.prepare('SELECT * FROM bumpers WHERE id=? AND user_id=?').get(Number(ctx.params.id), ctx.user.id);
+
+route('GET', '/bumpers', (ctx) => {
+  const bumpers = db.prepare('SELECT * FROM bumpers WHERE user_id=? ORDER BY name COLLATE NOCASE').all(ctx.user.id);
+  for (const b of bumpers) b.hasThumb = fs.existsSync(studio.thumbPath('bumper', b.id));
+  html(ctx, views.bumpersPage(ctx, { bumpers, ffmpegOk: media.isAvailable() }));
+});
+
+// Preglednik šalje sirovi video fajl; ffprobe potvrđuje da je zaista video.
+route('PUT', '/api/bumpers', async (ctx) => {
+  const header = (name) => {
+    try {
+      return decodeURIComponent(ctx.req.headers[name] || '');
+    } catch {
+      return '';
+    }
+  };
+  const fileName = path.basename(header('x-file-name') || 'clip');
+  const ext = path.extname(fileName).toLowerCase();
+  const file = path.join(cfg.bumpersDir, `${crypto.randomBytes(16).toString('hex')}${ext}`);
+  const accepted = BUMPER_EXT.test(fileName) && media.isAvailable();
+
+  // Tijelo zahtjeva se uvijek pročita do kraja, da preglednik dobije odgovor umjesto prekinute veze.
+  const out = accepted ? fs.createWriteStream(file) : null;
+  let size = 0;
+  for await (const chunk of ctx.req) {
+    size += chunk.length;
+    if (out && size <= MAX_BUMPER_BYTES && !out.write(chunk)) await once(out, 'drain');
+  }
+  if (out) await new Promise((done) => out.end(done));
+  const reject = (message, status = 400) => {
+    fs.rmSync(file, { force: true });
+    return json(ctx, { error: message }, status);
+  };
+
+  if (!BUMPER_EXT.test(fileName)) return reject('Choose a video file: MP4, MOV, MKV or WebM.');
+  if (!media.isAvailable()) return reject('ffmpeg is not installed, so the clip cannot be checked.');
+  if (!size) return reject('The file is empty.');
+  if (size > MAX_BUMPER_BYTES) return reject('The file is larger than 1 GB.', 413);
+
+  const name = (header('x-name').replace(/\s+/g, ' ').trim() || path.parse(fileName).name).slice(0, 60);
+  try {
+    await studio.addBumper(ctx.user.id, file, name, size);
+  } catch (err) {
+    return reject(`This file could not be read as a video (${err.message}).`);
+  }
+  flash(ctx, 'ok', `“${name}” has been added.`);
+  json(ctx, { redirect: '/bumpers' });
+});
+
+route('GET', '/bumpers/:id/thumb', (ctx) => {
+  const bumper = userBumper(ctx);
+  if (!bumper) return html(ctx, views.errorPage(ctx, 404, 'This clip does not exist.'), 404);
+  sendFile(ctx, studio.thumbPath('bumper', bumper.id));
+});
+
+route('GET', '/bumpers/:id/file', (ctx) => {
+  const bumper = userBumper(ctx);
+  if (!bumper) return html(ctx, views.errorPage(ctx, 404, 'This clip does not exist.'), 404);
+  sendFile(ctx, bumper.path);
+});
+
+route('POST', '/bumpers/:id/delete', (ctx) => {
+  const bumper = userBumper(ctx);
+  if (bumper) {
+    fs.rm(bumper.path, { force: true }, () => {});
+    fs.rm(studio.thumbPath('bumper', bumper.id), { force: true }, () => {});
+    db.prepare('DELETE FROM bumpers WHERE id=?').run(bumper.id);
+    flash(ctx, 'ok', `“${bumper.name}” has been deleted.`);
+  }
+  redirect(ctx, '/bumpers');
+});
+
+// ── Rute: gotovi videi (intro + video + outro) ────────────
+const userExport = (ctx) => db.prepare('SELECT * FROM exports WHERE id=? AND user_id=?').get(Number(ctx.params.id), ctx.user.id);
+
+// Glavni video može biti cijeli snimak ili izrezani Short.
+function exportSource(userId, kind, id) {
+  if (kind === 'recording') {
+    const r = db.prepare("SELECT * FROM recordings WHERE id=? AND user_id=? AND hidden=0 AND status='ready'").get(id, userId);
+    return r && { kind, id: r.id, name: path.parse(r.name).name, duration: r.duration, width: r.width, height: r.height, back: `/recordings/${r.id}` };
+  }
+  if (kind === 'clip') {
+    const c = db.prepare("SELECT * FROM clips WHERE id=? AND user_id=? AND status='ready'").get(id, userId);
+    return c && { kind, id: c.id, name: c.title, duration: c.end_s - c.start_s, width: 1080, height: 1920, back: '/shorts' };
+  }
+  return null;
+}
+
+route('GET', '/videos', (ctx) => {
+  const videos = db.prepare('SELECT * FROM exports WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
+  for (const v of videos) v.hasThumb = fs.existsSync(studio.thumbPath('video', v.id));
+  html(ctx, views.videosPage(ctx, { videos, ffmpegOk: media.isAvailable() }));
+});
+
+route('GET', '/videos/new', (ctx) => {
+  const kind = ctx.query.get('clip') ? 'clip' : 'recording';
+  const source = exportSource(ctx.user.id, kind, Number(ctx.query.get(kind)));
+  if (!source) return html(ctx, views.errorPage(ctx, 404, 'This video does not exist or is not ready yet.'), 404);
+  const bumpers = db.prepare('SELECT * FROM bumpers WHERE user_id=? ORDER BY name COLLATE NOCASE').all(ctx.user.id);
+  html(ctx, views.videoNewPage(ctx, { source, bumpers }));
+});
+
+route('POST', '/videos', async (ctx) => {
+  const form = await readForm(ctx.req);
+  const [kind, id] = (form.get('source') || '').split(':');
+  const source = exportSource(ctx.user.id, kind, Number(id));
+  if (!source) return html(ctx, views.errorPage(ctx, 404, 'This video does not exist or is not ready yet.'), 404);
+  const back = `/videos/new?${kind}=${source.id}`;
+  const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, back));
+
+  const pick = (field) => {
+    const value = form.get(field);
+    return value ? db.prepare('SELECT * FROM bumpers WHERE id=? AND user_id=?').get(Number(value), ctx.user.id) || false : null;
+  };
+  const intro = pick('intro');
+  const outro = pick('outro');
+  if (!media.isAvailable()) return fail('ffmpeg is not installed, so videos cannot be created yet.');
+  if (intro === false || outro === false) return fail('The chosen clip no longer exists. Choose another one.');
+  if (!intro && !outro) return fail('Choose an intro, an outro, or both.');
+
+  const title = (form.get('title') || '').trim().slice(0, 100) || source.name.slice(0, 100);
+  const bumperPart = (b) => ({ kind: 'bumper', id: b.id, name: b.name });
+  const parts = [intro && bumperPart(intro), { kind: source.kind, id: source.id, name: source.name, main: true }, outro && bumperPart(outro)];
+  studio.createExport(ctx.user.id, { title, parts: parts.filter(Boolean) });
+  flash(ctx, 'ok', `Video “${title}” is being created.`);
+  redirect(ctx, '/videos');
+});
+
+route('GET', '/videos/:id/file', (ctx) => {
+  const video = userExport(ctx);
+  if (!video || video.status !== 'ready') return html(ctx, views.errorPage(ctx, 404, 'This video does not exist.'), 404);
+  sendFile(ctx, video.path, ctx.query.get('download') ? `${video.title.replace(/[\\/:*?"<>|]/g, ' ')}.mp4` : null);
+});
+
+route('GET', '/videos/:id/thumb', (ctx) => {
+  const video = userExport(ctx);
+  if (!video) return html(ctx, views.errorPage(ctx, 404, 'This video does not exist.'), 404);
+  sendFile(ctx, studio.thumbPath('video', video.id));
+});
+
+route('POST', '/videos/:id/cancel', (ctx) => {
+  const video = userExport(ctx);
+  if (video && studio.cancelExport(video.id)) flash(ctx, 'ok', `Creating “${video.title}” was cancelled.`);
+  redirect(ctx, '/videos');
+});
+
+route('POST', '/videos/:id/delete', (ctx) => {
+  const video = userExport(ctx);
+  if (!video) return redirect(ctx, '/videos');
+  if (video.status === 'rendering') {
+    flash(ctx, 'bad', 'This video is still being created. Cancel it first.');
+    return redirect(ctx, '/videos');
+  }
+  fs.rm(video.path, { force: true }, () => {});
+  fs.rm(studio.thumbPath('video', video.id), { force: true }, () => {});
+  db.prepare('DELETE FROM exports WHERE id=?').run(video.id);
+  flash(ctx, 'ok', 'The video has been deleted.');
+  redirect(ctx, '/videos');
 });
 
 // ── Javne stranice ────────────────────────────────────────
