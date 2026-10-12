@@ -1,15 +1,10 @@
 'use strict';
 // HTML šabloni. Sve vrijednosti od korisnika prolaze kroz h() (escape).
 const cfg = require('./lib/config');
-const { CATEGORIES } = require('./lib/youtube');
 const { LAYOUTS } = require('./lib/media');
 
 const h = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-
-const YT_TOS = 'https://www.youtube.com/t/terms';
-const GOOGLE_PRIVACY = 'https://policies.google.com/privacy';
-const GOOGLE_PERMISSIONS = 'https://myaccount.google.com/connections';
 
 function layout(ctx, title, body) {
   const user = ctx.user;
@@ -32,7 +27,7 @@ function layout(ctx, title, body) {
   <a class="brand" href="/">${h(cfg.appName)}</a>
   ${
     user
-      ? `<nav>${nav('/upload', 'New video')}${nav('/dashboard', 'Posts')}${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}${nav('/accounts', 'Channels')}</nav>
+      ? `<nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}</nav>
          <form method="post" action="/logout" class="logout"><span class="who">${h(user.name)}</span><button class="link">Log out</button></form>`
       : ''
   }
@@ -86,230 +81,9 @@ function registerPage(ctx, { values = {}, error = '', needsInvite = true } = {})
   );
 }
 
-// ── Kanali ────────────────────────────────────────────────
-function accountsPage(ctx, { accounts, configured }) {
-  const rows = accounts
-    .map(
-      (a) => `<li class="account">
-    ${a.thumbnail ? `<img src="${h(a.thumbnail)}" alt="" width="40" height="40">` : '<span class="avatar"></span>'}
-    <div class="grow">
-      <strong>${h(a.name)}</strong>
-      <span class="muted small">YouTube · connected <time data-local="${h(a.created_at)}">${h(a.created_at)}</time></span>
-    </div>
-    ${
-      a.status === 'active'
-        ? '<span class="chip ok">Active</span>'
-        : `<span class="chip warn">Needs reconnecting</span><a class="button" href="/oauth/youtube/start">Reconnect</a>`
-    }
-    <form method="post" action="/accounts/${a.id}/disconnect" data-confirm="Disconnect the channel “${h(a.name)}”? The app will lose access to this channel.">
-      <button class="danger-outline">Disconnect</button>
-    </form>
-  </li>`
-    )
-    .join('');
-
-  return layout(
-    ctx,
-    'Channels',
-    `<div class="page-head">
-  <h1>Connected channels</h1>
-  ${configured ? '<a class="button primary" href="/oauth/youtube/start">+ Connect YouTube channel</a>' : ''}
-</div>
-${
-  configured
-    ? ''
-    : `<div class="notice warn"><strong>Google access is not configured.</strong> Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in <code>.env</code> and restart the app (see README, step 1).</div>`
-}
-${
-  accounts.length
-    ? `<ul class="list">${rows}</ul>`
-    : '<div class="empty">No channels connected yet.</div>'
-}
-<div class="notice">
-  <p><strong>Several channels on one Google account?</strong> Click “Connect YouTube channel” once for each channel and pick the channel you want (brand account) on Google's screen.</p>
-  <p>You can also revoke access directly in your <a href="${GOOGLE_PERMISSIONS}" target="_blank" rel="noopener">Google Account settings</a>.</p>
-  ${
-    cfg.ytAudited
-      ? ''
-      : '<p><strong>Note:</strong> until Google approves the audit, the sign-in expires after 7 days and the channel has to be reconnected.</p>'
-  }
-</div>`
-  );
-}
-
-// ── Novi video ────────────────────────────────────────────
-function uploadPage(ctx, { accounts, preset = null, title = '' }) {
-  const active = accounts.filter((a) => a.status === 'active');
-  const channelList = active
-    .map(
-      (a) => `<label class="channel">
-      <input type="checkbox" name="accounts" value="${a.id}">
-      ${a.thumbnail ? `<img src="${h(a.thumbnail)}" alt="" width="28" height="28">` : '<span class="avatar sm"></span>'}
-      <span>${h(a.name)}</span>
-    </label>`
-    )
-    .join('');
-
-  const auditBanner = cfg.ytAudited
-    ? ''
-    : `<div class="notice warn"><strong>This project has not passed the Google audit yet.</strong> YouTube will lock every video as private, whatever you choose below. Use a test channel until the audit is approved.</div>`;
-
-  if (!active.length) {
-    return layout(
-      ctx,
-      'New video',
-      `<h1>New video</h1>${auditBanner}
-<div class="empty">Connect at least one channel first. <a class="button primary" href="/accounts">Go to Channels</a></div>`
-    );
-  }
-
-  return layout(
-    ctx,
-    'New video',
-    `<h1>New video</h1>
-${auditBanner}
-<form id="upload-form" class="grid" novalidate>
-  <section class="card">
-    <h2>1. Video</h2>
-    <label class="drop${preset ? ' has-file' : ''}" id="drop">
-      <input type="file" name="file" id="file" accept="video/*"${preset ? '' : ' required'}>
-      <span id="drop-text">${
-        preset
-          ? `<strong>${h(preset.original_name)}</strong> · ${fmtSize(preset.size)}`
-          : '<strong>Choose a video</strong> or drag it here'
-      }</span>
-    </label>
-    ${preset ? `<input type="hidden" id="preset-file" value="${h(preset.id)}">` : ''}
-
-    <h2>2. Details</h2>
-    <label>Title <span class="counter" data-for="title" data-max="100"></span>
-      <input name="title" id="title" maxlength="100" value="${h(preset ? title : '')}" required>
-    </label>
-    <label>Description <span class="counter" data-for="description" data-max="5000"></span>
-      <textarea name="description" id="description" rows="6" maxlength="5000"></textarea>
-    </label>
-    <label>Tags <span class="muted">(comma-separated)</span>
-      <input name="tags" placeholder="e.g. vlog, travel, sarajevo">
-    </label>
-    <label>Category
-      <select name="category">${CATEGORIES.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
-    </label>
-
-    <fieldset>
-      <legend>Visibility</legend>
-      <label class="radio"><input type="radio" name="privacy" value="public" required> <span><strong>Public</strong> – everyone can watch</span></label>
-      <label class="radio"><input type="radio" name="privacy" value="unlisted"> <span><strong>Unlisted</strong> – only people with the link</span></label>
-      <label class="radio"><input type="radio" name="privacy" value="private"> <span><strong>Private</strong> – only you</span></label>
-    </fieldset>
-
-    <fieldset>
-      <legend>Is this video made for kids?</legend>
-      <label class="radio"><input type="radio" name="made_for_kids" value="no" required> <span>No, it's not made for kids</span></label>
-      <label class="radio"><input type="radio" name="made_for_kids" value="yes"> <span>Yes, it's made for kids</span></label>
-      <p class="muted small">This is required by law (COPPA) and by YouTube's rules.</p>
-    </fieldset>
-
-    <details>
-      <summary>Schedule (optional)</summary>
-      <label>Publish date and time
-        <input type="datetime-local" name="schedule" id="schedule">
-      </label>
-      <p class="muted small">The video is uploaded right away as private and becomes public automatically at the set time. To schedule, choose “Public”.</p>
-    </details>
-  </section>
-
-  <section class="card">
-    <h2>3. Channels</h2>
-    <label class="channel all"><input type="checkbox" id="select-all"> <span>Select all (${active.length})</span></label>
-    <div class="channels">${channelList}</div>
-
-    <p class="legal">
-      By publishing you confirm that you accept the <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube Terms of Service</a>
-      and that Google data is processed under the <a href="${GOOGLE_PRIVACY}" target="_blank" rel="noopener">Google Privacy Policy</a>.
-      The video is published only to the channels you selected.
-    </p>
-
-    <p class="error" id="form-error" hidden></p>
-    <div class="progress" id="progress" hidden><div class="bar"></div><span class="label"></span></div>
-    <button class="primary big" id="submit">Publish to selected channels</button>
-  </section>
-</form>`
-  );
-}
-
-// ── Objave ────────────────────────────────────────────────
-const STATUS = {
-  pending: ['Pending', 'muted'],
-  uploading: ['Uploading', 'info'],
-  done: ['Published', 'ok'],
-  failed: ['Failed', 'bad'],
-};
-const PRIVACY = { public: 'Public', unlisted: 'Unlisted', private: 'Private' };
-
 function fmtSize(bytes) {
   if (bytes > 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
-}
-
-function dashboardPage(ctx, { videos, uploadsToday }) {
-  const active = videos.some((v) => v.jobs.some((j) => j.status === 'uploading' || j.status === 'pending'));
-
-  const cards = videos
-    .map((v) => {
-      const busy = v.jobs.some((j) => j.status === 'uploading');
-      const jobs = v.jobs
-        .map((j) => {
-          const [label, cls] = STATUS[j.status] || [j.status, 'muted'];
-          return `<li class="job">
-          <div class="grow">
-            <strong>${h(j.account_name)}</strong>
-            ${j.status === 'uploading' ? `<div class="progress small"><div class="bar" style="width:${j.progress}%"></div><span class="label">${j.progress}%</span></div>` : ''}
-            ${j.error ? `<p class="small ${j.status === 'failed' ? 'error' : 'muted'}">${h(j.error)}</p>` : ''}
-          </div>
-          <span class="chip ${cls}">${label}</span>
-          ${j.external_url ? `<a class="button" href="${h(j.external_url)}" target="_blank" rel="noopener">Open</a>` : ''}
-          ${
-            j.status === 'failed'
-              ? `<form method="post" action="/jobs/${j.id}/retry"><button>Retry</button></form>`
-              : ''
-          }
-        </li>`;
-        })
-        .join('');
-      const done = v.jobs.filter((j) => j.status === 'done').length;
-      return `<article class="card video">
-      <div class="video-head">
-        <div class="grow">
-          <h2>${h(v.title)}</h2>
-          <p class="muted small">
-            ${PRIVACY[v.privacy] || h(v.privacy)}
-            ${v.publish_at ? ` · scheduled for <time data-local="${h(v.publish_at)}">${h(v.publish_at)}</time>` : ''}
-            · ${fmtSize(v.size)} · <time data-local="${h(v.created_at)}">${h(v.created_at)}</time>
-            · ${done}/${v.jobs.length} published
-          </p>
-        </div>
-        ${
-          busy
-            ? ''
-            : `<form method="post" action="/videos/${v.id}/delete" data-confirm="Delete this record from the app? Videos already on YouTube stay there."><button class="danger-outline">Delete record</button></form>`
-        }
-      </div>
-      <ul class="jobs">${jobs}</ul>
-    </article>`;
-    })
-    .join('');
-
-  return layout(
-    ctx,
-    'Posts',
-    `<div class="page-head">
-  <h1>Posts</h1>
-  <a class="button primary" href="/upload">+ New video</a>
-</div>
-<p class="muted small quota">Uploads today (the Google quota resets at midnight Pacific Time): <strong>${uploadsToday}</strong> / ~100</p>
-${videos.length ? cards : '<div class="empty">No posts yet. <a href="/upload">Publish your first video</a></div>'}
-${active ? '<div data-autorefresh="4000" hidden></div>' : ''}`
-  );
 }
 
 // ── Snimci i Shorts ───────────────────────────────────────
@@ -387,8 +161,7 @@ function shortTiles(clips, { from = '' } = {}) {
       <div class="short-actions">
         ${
           c.status === 'ready'
-            ? `<form method="post" action="/clips/${c.id}/publish"><button class="primary">Publish</button></form>
-               <a class="button" href="/clips/${c.id}/file?download=1">Download</a>`
+            ? `<a class="button primary" href="/clips/${c.id}/file?download=1">Download</a>`
             : ''
         }
         ${
@@ -553,9 +326,9 @@ ${studioPoll(busy && ffmpegOk)}
   );
 }
 
-// ── Pravne stranice (trebaju za Google audit) ──────────────
+// ── Pravne stranice ───────────────────────────────────────
 function privacyPage(ctx) {
-  const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the app administrator';
+  const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the person who runs this copy of the app';
   return layout(
     ctx,
     'Privacy Policy',
@@ -563,35 +336,27 @@ function privacyPage(ctx) {
 <h1>Privacy Policy</h1>
 <p class="muted">Last updated: October 12, 2026.</p>
 
-<p>${h(cfg.appName)} is an app that lets users publish one video to several of their YouTube channels at once. This policy explains what data the app uses and why.</p>
+<p>${h(cfg.appName)} is an app for turning gameplay recordings into videos that are ready to publish. It runs on the computer of the person who installed it, and everything it stores stays on that computer.</p>
 
-<h2>YouTube API Services</h2>
-<p>${h(cfg.appName)} uses YouTube API Services. By using the app you agree to the <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube Terms of Service</a>. Data received from Google is also processed in line with the <a href="${GOOGLE_PRIVACY}" target="_blank" rel="noopener">Google Privacy Policy</a>.</p>
-
-<h2>What data we collect</h2>
+<h2>What the app stores</h2>
 <ul>
-  <li><strong>Account data:</strong> name, email address and password (stored only as a cryptographic hash).</li>
-  <li><strong>YouTube channel data:</strong> channel ID, channel name and thumbnail, fetched through the YouTube API when you connect a channel.</li>
-  <li><strong>OAuth tokens:</strong> access tokens issued by Google, stored encrypted (AES-256-GCM).</li>
-  <li><strong>Video content:</strong> the video file, title, description, tags and settings you enter.</li>
+  <li><strong>Account data:</strong> your name, email address and password (stored only as a cryptographic hash).</li>
+  <li><strong>Your recordings:</strong> the video files you copy into the recordings folder, plus what the app works out from them: length, resolution, loudness over time and a thumbnail.</li>
+  <li><strong>What you create:</strong> the Shorts you cut and the titles you give them.</li>
 </ul>
 
-<h2>How we use data</h2>
-<p>We use the data only to upload a video, at your explicit request, to the channels you selected and to show the status of the post. The app does not read, analyze or change anything else on your channels. The permissions we request are <code>youtube.upload</code> (publishing videos) and <code>youtube.readonly</code> (showing the channel name and thumbnail).</p>
+<h2>How the data is used</h2>
+<p>The data is used only to show you your recordings and to create the videos you ask for. The app does not upload your videos anywhere and does not send any data to third parties.</p>
 
-<h2>Data sharing</h2>
-<p>We do not sell data and do not share it with third parties. The only party data is sent to is Google/YouTube, and only to publish a video you started yourself.</p>
-
-<h2>Retention and deletion</h2>
+<h2>Deleting data</h2>
 <ul>
-  <li>The video file is deleted from the app's server automatically as soon as it is published to all selected channels.</li>
-  <li>When you disconnect a channel, the app revokes Google access and deletes the stored tokens.</li>
-  <li>You can also revoke access at any time on the <a href="${GOOGLE_PERMISSIONS}" target="_blank" rel="noopener">Google Account security settings</a> page.</li>
-  <li>To delete your whole account and all data, contact ${contact}.</li>
+  <li>Deleting a Short deletes its video file.</li>
+  <li>Removing a recording takes it off the list and leaves the original file on disk.</li>
+  <li>To delete your whole account, contact ${contact}.</li>
 </ul>
 
 <h2>Cookies</h2>
-<p>The app uses one cookie that is required for signing in. We do not use cookies for tracking or advertising.</p>
+<p>The app uses one cookie that is required for signing in. It does not use cookies for tracking or advertising.</p>
 
 <h2>Contact</h2>
 <p>Privacy questions: ${contact}.</p>
@@ -608,14 +373,12 @@ function termsPage(ctx) {
 <p class="muted">Last updated: October 12, 2026.</p>
 <p>By using ${h(cfg.appName)} you accept these terms.</p>
 <ol>
-  <li>The app uses YouTube API Services. By using the app you agree to be bound by the <a href="${YT_TOS}" target="_blank" rel="noopener">YouTube Terms of Service</a>.</li>
-  <li>You may only connect channels you own or have the owner's permission to use.</li>
-  <li>You are responsible for the content you publish, including copyright and the YouTube Community Guidelines.</li>
-  <li>Using the app for spam, deceptive behavior or getting around YouTube's rules is prohibited.</li>
-  <li>The app is provided “as is”, with no guarantee that every post will succeed.</li>
-  <li>We may remove access for an account that breaks these terms.</li>
+  <li>You may only work with recordings you made yourself or have permission to use.</li>
+  <li>You are responsible for what you publish, including copyright and the rules of the platform you publish on.</li>
+  <li>The app is provided “as is”, with no guarantee that every video will be created successfully.</li>
+  <li>Access may be removed for an account that breaks these terms.</li>
 </ol>
-<p>Data processing is described in the <a href="/privacy">Privacy Policy</a>.</p>
+<p>Data handling is described in the <a href="/privacy">Privacy Policy</a>.</p>
 </article>`
   );
 }
@@ -633,9 +396,6 @@ module.exports = {
   fmtTime,
   loginPage,
   registerPage,
-  accountsPage,
-  uploadPage,
-  dashboardPage,
   recordingsPage,
   recordingPage,
   shortsPage,

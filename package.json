@@ -1,8 +1,8 @@
 {
-  "name": "multipost",
-  "version": "0.1.0",
+  "name": "cutdeck",
+  "version": "0.2.0",
   "private": true,
-  "description": "Local app for publishing one video to several YouTube channels at once.",
+  "description": "Local app for turning gameplay recordings into YouTube-ready videos: Shorts, thumbnails, intros and outros.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

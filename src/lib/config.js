@@ -4,31 +4,24 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const ROOT = path.join(__dirname, '..', '..');
-const envPath = process.env.MULTIPOST_ENV || path.join(ROOT, '.env');
+const envPath = process.env.CUTDECK_ENV || path.join(ROOT, '.env');
 
-// Prvo pokretanje: napravi .env iz primjera i generiši tajne ključeve.
+// Prvo pokretanje: napravi .env iz primjera i generiši tajni ključ za sesije.
 if (!fs.existsSync(envPath)) {
   fs.copyFileSync(path.join(ROOT, '.env.example'), envPath);
   console.log('Created .env from .env.example');
 }
-let text = fs.readFileSync(envPath, 'utf8');
-let changed = false;
-for (const key of ['SESSION_SECRET', 'ENCRYPTION_KEY']) {
-  const re = new RegExp(`^${key}=[ \\t]*$`, 'm');
-  if (re.test(text)) {
-    text = text.replace(re, `${key}=${crypto.randomBytes(32).toString('hex')}`);
-    changed = true;
-  }
-}
-if (changed) {
-  fs.writeFileSync(envPath, text);
-  console.log('Generated SESSION_SECRET and ENCRYPTION_KEY in .env');
+const text = fs.readFileSync(envPath, 'utf8');
+const emptySecret = /^SESSION_SECRET=[ \t]*$/m;
+if (emptySecret.test(text)) {
+  fs.writeFileSync(envPath, text.replace(emptySecret, `SESSION_SECRET=${crypto.randomBytes(32).toString('hex')}`));
+  console.log('Generated SESSION_SECRET in .env');
 }
 process.loadEnvFile(envPath);
 
 const env = process.env;
-if (!/^[0-9a-f]{64}$/i.test(env.ENCRYPTION_KEY || '')) {
-  console.error('ENCRYPTION_KEY in .env must be exactly 64 hexadecimal characters.');
+if (!env.SESSION_SECRET) {
+  console.error('SESSION_SECRET is missing from .env. Add an empty "SESSION_SECRET=" line and start the app again.');
   process.exit(1);
 }
 
@@ -40,7 +33,7 @@ function findTool(name, override) {
   return linked && fs.existsSync(linked) ? linked : name;
 }
 
-const baseUrl =(env.BASE_URL || `http://localhost:${env.PORT || 3000}`).replace(/\/+$/, '');
+const baseUrl = (env.BASE_URL || `http://localhost:${env.PORT || 3000}`).replace(/\/+$/, '');
 
 module.exports = {
   root: ROOT,
@@ -53,14 +46,8 @@ module.exports = {
   port: Number(env.PORT || 3000),
   baseUrl,
   secureCookies: baseUrl.startsWith('https://'),
-  appName: env.APP_NAME || 'MultiPost',
+  appName: env.APP_NAME || 'CutDeck',
   inviteCode: env.INVITE_CODE || '',
   contactEmail: env.CONTACT_EMAIL || '',
   sessionSecret: env.SESSION_SECRET,
-  encryptionKey: Buffer.from(env.ENCRYPTION_KEY, 'hex'),
-  googleClientId: env.GOOGLE_CLIENT_ID || '',
-  googleClientSecret: env.GOOGLE_CLIENT_SECRET || '',
-  ytAudited: env.YT_PROJECT_AUDITED === 'true',
-  concurrency: Math.max(1, Number(env.UPLOAD_CONCURRENCY || 2)),
-  maxUploadBytes: 20 * 1024 ** 3, // 20 GB
 };
