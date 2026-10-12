@@ -6,33 +6,60 @@ const { LAYOUTS, CAPTION_FONTS, DEFAULT_CAPTION_STYLE } = require('./lib/media')
 const h = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
+// Ikone bočnog menija (16×16, linije u boji teksta).
+const ICONS = {
+  recordings: '<path d="M2.5 4h11v8h-11zM5.25 4v8M10.75 4v8M2.5 8h2.75M10.75 8h2.75"/>',
+  shorts: '<rect x="4.5" y="2" width="7" height="12" rx="1.5"/><path d="M7.1 6.4v3.2L9.8 8z" fill="currentColor"/>',
+  thumbnails: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2.5 11l3.2-3.2 2.4 2.4 1.9-1.9 3.5 3.5"/>',
+  videos: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M6.7 6.1v3.8L10.1 8z" fill="currentColor"/>',
+  bumpers: '<path d="M3 3.5v9M13 3.5v9"/><rect x="5.5" y="5.5" width="5" height="5" rx="1"/>',
+};
+const icon = (name) =>
+  `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+// Znak aplikacije: jedan blok presječen na dva dijela.
+const BRAND_MARK = '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3H11l-3 14H4.5A1.5 1.5 0 0 1 3 15.5z" fill="#ffb02e"/><path d="M13 3h2.5A1.5 1.5 0 0 1 17 4.5v11a1.5 1.5 0 0 1-1.5 1.5H10z" fill="#6cb6ff"/></svg>';
+
 function layout(ctx, title, body) {
-  const nav = (href, label) =>
-    `<a href="${href}" class="${ctx.path.startsWith(href) ? 'active' : ''}">${label}</a>`;
+  // Stavka je aktivna i na podstranicama; `also` su adrese koje joj pripadaju a ne počinju isto.
+  const nav = (href, label, name, also = []) => {
+    const active = [href, ...also].some((p) => ctx.path.startsWith(p));
+    return `<a href="${href}"${active ? ' class="active" aria-current="page"' : ''}>${icon(name)}<span>${label}</span></a>`;
+  };
   const flash = ctx.flash
     ? `<div class="flash ${h(ctx.flash.type)}" role="status">${h(ctx.flash.msg)}</div>`
     : '';
+  const favicon = encodeURIComponent(BRAND_MARK.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" '));
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>${h(title)} · ${h(cfg.appName)}</title>
 <link rel="stylesheet" href="/static/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>▶</text></svg>">
+<link rel="icon" href="data:image/svg+xml,${favicon}">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="/">${h(cfg.appName)}</a>
-  <nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}${nav('/thumbnails', 'Thumbnails')}${nav('/videos', 'Videos')}${nav('/bumpers', 'Intros and outros')}</nav>
-</header>
-<main>
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="/">${BRAND_MARK}<span>${h(cfg.appName)}</span></a>
+    <nav class="side-nav" aria-label="Main">
+      <p class="side-label">Library</p>
+      ${nav('/recordings', 'Recordings', 'recordings')}
+      <p class="side-label">Create</p>
+      ${nav('/shorts', 'Shorts', 'shorts', ['/clips'])}
+      ${nav('/thumbnails', 'Thumbnails', 'thumbnails')}
+      ${nav('/videos', 'Videos', 'videos')}
+      <p class="side-label">Assets</p>
+      ${nav('/bumpers', 'Intros and outros', 'bumpers')}
+    </nav>
+    <p class="side-foot"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></p>
+  </aside>
+  <main>
 ${flash}
 ${body}
-</main>
-<footer class="foot">
-  <a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a>
-</footer>
+  </main>
+</div>
 <script src="/static/app.js" defer></script>
 </body>
 </html>`;
@@ -634,8 +661,8 @@ function captionsPage(ctx, { clip, captions, problem }) {
   <ol class="cap-lines" id="cap-lines">${lines
           .map(
             (l) => `<li>
-      <input type="number" name="start" value="${l.start}" min="0" step="0.05" aria-label="Appears at, in seconds">
-      <input type="number" name="end" value="${l.end}" min="0" step="0.05" aria-label="Disappears at, in seconds">
+      <input type="number" name="start" value="${l.start}" min="0" step="0.01" aria-label="Appears at, in seconds">
+      <input type="number" name="end" value="${l.end}" min="0" step="0.01" aria-label="Disappears at, in seconds">
       <input name="text" value="${h(l.text)}" maxlength="120" aria-label="Caption text">
       <button type="button" class="danger-outline" data-cap-remove aria-label="Remove this line" title="Remove this line">×</button>
     </li>`
