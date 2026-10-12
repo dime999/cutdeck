@@ -82,6 +82,15 @@ addColumn('recordings', 'waveform', 'TEXT');
 
 db.now = () => new Date().toISOString();
 
+// Aplikacija nema prijavu: sve pripada jednom lokalnom korisniku.
+// Ako baza već ima korisnika iz vremena prijave, njegovi snimci ostaju njegovi.
+db.localUser = () => {
+  const first = db.prepare('SELECT id, name FROM users ORDER BY id LIMIT 1').get();
+  if (first) return first;
+  const r = db.prepare("INSERT INTO users (email, name, password_hash, created_at) VALUES ('local', 'You', '', ?)").run(db.now());
+  return { id: Number(r.lastInsertRowid), name: 'You' };
+};
+
 db.transaction = (fn) => {
   db.exec('BEGIN');
   try {

@@ -7,7 +7,6 @@ const h = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 function layout(ctx, title, body) {
-  const user = ctx.user;
   const nav = (href, label) =>
     `<a href="${href}" class="${ctx.path.startsWith(href) ? 'active' : ''}">${label}</a>`;
   const flash = ctx.flash
@@ -25,12 +24,7 @@ function layout(ctx, title, body) {
 <body>
 <header class="top">
   <a class="brand" href="/">${h(cfg.appName)}</a>
-  ${
-    user
-      ? `<nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}</nav>
-         <form method="post" action="/logout" class="logout"><span class="who">${h(user.name)}</span><button class="link">Log out</button></form>`
-      : ''
-  }
+  <nav>${nav('/recordings', 'Recordings')}${nav('/shorts', 'Shorts')}</nav>
 </header>
 <main>
 ${flash}
@@ -42,43 +36,6 @@ ${body}
 <script src="/static/app.js" defer></script>
 </body>
 </html>`;
-}
-
-// ── Prijava i registracija ─────────────────────────────────
-function loginPage(ctx, { email = '', error = '' } = {}) {
-  return layout(
-    ctx,
-    'Log in',
-    `<section class="card narrow">
-  <h1>Log in</h1>
-  ${error ? `<p class="error">${h(error)}</p>` : ''}
-  <form method="post" action="/login" class="stack">
-    <label>Email<input type="email" name="email" value="${h(email)}" required autofocus autocomplete="email"></label>
-    <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
-    <button class="primary">Log in</button>
-  </form>
-  <p class="muted">Don't have an account? <a href="/register">Sign up</a></p>
-</section>`
-  );
-}
-
-function registerPage(ctx, { values = {}, error = '', needsInvite = true } = {}) {
-  return layout(
-    ctx,
-    'Sign up',
-    `<section class="card narrow">
-  <h1>Sign up</h1>
-  ${error ? `<p class="error">${h(error)}</p>` : ''}
-  <form method="post" action="/register" class="stack">
-    <label>Name<input name="name" value="${h(values.name)}" required maxlength="60" autocomplete="name"></label>
-    <label>Email<input type="email" name="email" value="${h(values.email)}" required autocomplete="email"></label>
-    <label>Password <span class="muted">(at least 8 characters)</span><input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
-    ${needsInvite ? `<label>Invite code<input name="invite" value="${h(values.invite)}" required></label>` : ''}
-    <button class="primary">Create account</button>
-  </form>
-  <p class="muted">Already have an account? <a href="/login">Log in</a></p>
-</section>`
-  );
 }
 
 function fmtSize(bytes) {
@@ -136,7 +93,14 @@ function timeline(rec, moments, { clips = [], interactive = false } = {}) {
   return `<div class="tl${interactive ? ' tl-live' : ''}"${interactive ? ` id="timeline" data-duration="${duration}"` : ''}>
     <svg class="tl-wave" viewBox="0 0 ${Math.max(1, wave.length)} 100" preserveAspectRatio="none" aria-hidden="true"><path d="${bars}"/></svg>
     ${marks}${made}
-    ${interactive ? '<span class="tl-selection" id="tl-selection" hidden></span><span class="tl-playhead" id="tl-playhead"></span>' : ''}
+    ${
+      interactive
+        ? `<div class="tl-selection" id="tl-selection" tabindex="0" role="group" aria-label="Selected part. Arrow keys move it by one second." hidden>
+        <span class="tl-handle" data-edge="start"></span><span class="tl-handle" data-edge="end"></span>
+      </div>
+      <span class="tl-playhead" id="tl-playhead"></span>`
+        : ''
+    }
   </div>`;
 }
 
@@ -247,8 +211,25 @@ function recordingPage(ctx, { rec, moments, clips, ffmpegOk }) {
 <form method="post" action="/recordings/${rec.id}/analyze"><button>Analyze again</button></form>`;
   } else {
     const quarter = [0, 0.25, 0.5, 0.75, 1].map((f) => `<span>${fmtTime(rec.duration * f)}</span>`).join('');
-    analysis = `${timeline(rec, moments, { clips, interactive: true })}
-<div class="tl-scale" aria-hidden="true">${quarter}</div>
+    const lengths = [[15, '15 s'], [30, '30 s'], [45, '45 s'], [60, '1 min']];
+    analysis = `<div class="tl-tools">
+  <div class="tl-group" role="group" aria-label="Length of the selected part">
+    ${lengths.map(([s, label]) => `<button type="button" data-length="${s}">${label}</button>`).join('')}
+  </div>
+  <button type="button" data-play-selection>Play selection</button>
+  <div class="tl-group tl-zoom" role="group" aria-label="Timeline zoom">
+    <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+    <button type="button" data-zoom="fit">Zoom to selection</button>
+    <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+  </div>
+</div>
+<div class="tl-scroll" id="tl-scroll">
+  <div class="tl-inner" id="tl-inner">
+    ${timeline(rec, moments, { clips, interactive: true })}
+    <div class="tl-scale" id="tl-scale" aria-hidden="true">${quarter}</div>
+  </div>
+</div>
+<p class="small muted">Drag across the timeline to select a part. Drag the selection to move it, or its edges to trim it. A length button resizes it from its start.</p>
 ${
   moments.length
     ? `<p class="small muted">Highlighted ranges are the loudest moments. Select one to watch it and load it into the form.</p>
@@ -274,7 +255,7 @@ ${ffmpegNotice(ffmpegOk)}
 <div class="grid">
   <section class="card">
     <video class="player" id="player" src="/recordings/${rec.id}/file"${rec.hasThumb ? ` poster="/recordings/${rec.id}/thumb"` : ''} controls preload="metadata"></video>
-    <div id="live-moments" data-live data-poll-key="rec:${rec.id}" data-state="${h(rec.status)}">
+    <div id="live-moments" data-live data-rev="${h(rec.status)}:${clips.filter((c) => c.status === 'ready').map((c) => c.id).join(',')}" data-poll-key="rec:${rec.id}" data-state="${h(rec.status)}">
       ${rec.status === 'ready' ? '' : `<p><span class="chip ${cls}">${label}</span></p>`}
       ${analysis}
     </div>
@@ -340,7 +321,6 @@ function privacyPage(ctx) {
 
 <h2>What the app stores</h2>
 <ul>
-  <li><strong>Account data:</strong> your name, email address and password (stored only as a cryptographic hash).</li>
   <li><strong>Your recordings:</strong> the video files you copy into the recordings folder, plus what the app works out from them: length, resolution, loudness over time and a thumbnail.</li>
   <li><strong>What you create:</strong> the Shorts you cut and the titles you give them.</li>
 </ul>
@@ -352,11 +332,10 @@ function privacyPage(ctx) {
 <ul>
   <li>Deleting a Short deletes its video file.</li>
   <li>Removing a recording takes it off the list and leaves the original file on disk.</li>
-  <li>To delete your whole account, contact ${contact}.</li>
 </ul>
 
 <h2>Cookies</h2>
-<p>The app uses one cookie that is required for signing in. It does not use cookies for tracking or advertising.</p>
+<p>The app sets one short-lived cookie to show a confirmation message after an action. It does not use cookies for tracking or advertising.</p>
 
 <h2>Contact</h2>
 <p>Privacy questions: ${contact}.</p>
@@ -376,7 +355,6 @@ function termsPage(ctx) {
   <li>You may only work with recordings you made yourself or have permission to use.</li>
   <li>You are responsible for what you publish, including copyright and the rules of the platform you publish on.</li>
   <li>The app is provided “as is”, with no guarantee that every video will be created successfully.</li>
-  <li>Access may be removed for an account that breaks these terms.</li>
 </ol>
 <p>Data handling is described in the <a href="/privacy">Privacy Policy</a>.</p>
 </article>`
@@ -394,8 +372,6 @@ function errorPage(ctx, status, message) {
 module.exports = {
   h,
   fmtTime,
-  loginPage,
-  registerPage,
   recordingsPage,
   recordingPage,
   shortsPage,

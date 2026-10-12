@@ -7,44 +7,40 @@ const cfg = require('./lib/config');
 const db = require('./lib/db');
 const media = require('./lib/media');
 const studio = require('./lib/studio');
-const sec = require('./lib/security');
 const views = require('./views');
+
+const LOCAL_USER = db.localUser();
 
 // ── Mini router ───────────────────────────────────────────
 const routes = [];
-function route(method, pattern, handler, { auth = false } = {}) {
+function route(method, pattern, handler) {
   const keys = [];
   const re = new RegExp(
     '^' + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), '([^/]+)')) + '/?$'
   );
-  routes.push({ method, re, keys, handler, auth });
+  routes.push({ method, re, keys, handler });
 }
 
-const SESSION_COOKIE = 'cutdeck_session';
-const SESSION_DAYS = 30;
+// Aplikacija nema prijavu. Kolačić služi samo da poruka potvrde preživi preusmjerenje.
+const FLASH_COOKIE = 'cutdeck_flash';
 
-function parseCookies(header = '') {
-  const out = {};
-  for (const part of header.split(';')) {
-    const i = part.indexOf('=');
-    if (i > 0) out[part.slice(0, i).trim()] = decodeURIComponent(part.slice(i + 1).trim());
+function readFlash(req) {
+  const m = new RegExp(`(?:^|;\\s*)${FLASH_COOKIE}=([^;]*)`).exec(req.headers.cookie || '');
+  if (!m) return null;
+  try {
+    const f = JSON.parse(decodeURIComponent(m[1]));
+    return ['ok', 'bad'].includes(f.type) && typeof f.msg === 'string' ? { type: f.type, msg: f.msg } : null;
+  } catch {
+    return null;
   }
-  return out;
-}
-
-function sessionCookie(session) {
-  const value = sec.signSession({ ...session, exp: Date.now() + SESSION_DAYS * 864e5 });
-  return `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}${cfg.secureCookies ? '; Secure' : ''}`;
 }
 
 function baseHeaders(ctx, extra = {}) {
-  return {
-    'set-cookie': sessionCookie(ctx.session),
-    'x-content-type-options': 'nosniff',
-    'x-frame-options': 'DENY',
-    'referrer-policy': 'same-origin',
-    ...extra,
-  };
+  const headers = { 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'referrer-policy': 'same-origin', ...extra };
+  const cookie = `${FLASH_COOKIE}=${ctx.flashOut ? encodeURIComponent(JSON.stringify(ctx.flashOut)) : ''}; Path=/; HttpOnly; SameSite=Lax`;
+  if (ctx.flashOut) headers['set-cookie'] = cookie;
+  else if (ctx.flash) headers['set-cookie'] = `${cookie}; Max-Age=0`; // poruka je prikazana
+  return headers;
 }
 
 function send(ctx, status, body, type = 'text/html; charset=utf-8') {
@@ -58,7 +54,7 @@ function redirect(ctx, location) {
   ctx.res.end();
 }
 function flash(ctx, type, msg) {
-  ctx.session.flash = { type, msg };
+  ctx.flashOut = { type, msg };
 }
 
 async function readForm(req, limit = 1024 * 1024) {
@@ -102,12 +98,7 @@ async function handle(req, res) {
   const url = new URL(req.url, cfg.baseUrl);
   if (url.pathname.startsWith('/static/')) return serveStatic(req, res, url.pathname);
 
-  const session = sec.readSession(parseCookies(req.headers.cookie)[SESSION_COOKIE]);
-  const user = session.uid ? db.prepare('SELECT id, name, email FROM users WHERE id=?').get(session.uid) : null;
-  if (!user) delete session.uid;
-  const flashMsg = session.flash;
-  delete session.flash;
-  const ctx = { req, res, url, path: url.pathname, query: url.searchParams, session, user, flash: flashMsg, params: {} };
+  const ctx = { req, res, url, path: url.pathname, query: url.searchParams, user: LOCAL_USER, flash: readFlash(req), params: {} };
 
   if (['POST', 'PUT', 'DELETE'].includes(req.method) && !sameOrigin(req)) {
     return html(ctx, views.errorPage(ctx, 403, 'The request did not come from this site.'), 403);
@@ -119,80 +110,12 @@ async function handle(req, res) {
     const m = r.re.exec(url.pathname);
     if (!m) continue;
     r.keys.forEach((k, i) => (ctx.params[k] = decodeURIComponent(m[i + 1])));
-    if (r.auth && !user) {
-      if (url.pathname.startsWith('/api/')) return json(ctx, { error: 'Your session has expired. Refresh the page.' }, 401);
-      return redirect(ctx, '/login');
-    }
     return r.handler(ctx);
   }
   html(ctx, views.errorPage(ctx, 404, 'This page does not exist.'), 404);
 }
 
-// ── Rute: prijava ─────────────────────────────────────────
-route('GET', '/', (ctx) => redirect(ctx, ctx.user ? '/recordings' : '/login'));
-
-route('GET', '/login', (ctx) => (ctx.user ? redirect(ctx, '/recordings') : html(ctx, views.loginPage(ctx))));
-
-const loginAttempts = new Map();
-route('POST', '/login', async (ctx) => {
-  const form = await readForm(ctx.req);
-  const email = (form.get('email') || '').trim();
-  const ip = ctx.req.socket.remoteAddress;
-  const a = loginAttempts.get(ip) || { n: 0, until: 0 };
-  if (a.until > Date.now()) {
-    return html(ctx, views.loginPage(ctx, { email, error: 'Too many attempts. Wait a minute and try again.' }), 429);
-  }
-  const u = db.prepare('SELECT * FROM users WHERE email=?').get(email);
-  if (!u || !sec.verifyPassword(form.get('password') || '', u.password_hash)) {
-    a.n += 1;
-    if (a.n >= 5) Object.assign(a, { n: 0, until: Date.now() + 60000 });
-    loginAttempts.set(ip, a);
-    return html(ctx, views.loginPage(ctx, { email, error: 'Wrong email or password.' }), 401);
-  }
-  loginAttempts.delete(ip);
-  ctx.session = { uid: u.id };
-  redirect(ctx, '/recordings');
-});
-
-function registrationNeedsInvite() {
-  const count = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
-  return count > 0;
-}
-
-route('GET', '/register', (ctx) => {
-  if (ctx.user) return redirect(ctx, '/recordings');
-  const needsInvite = registrationNeedsInvite();
-  if (needsInvite && !cfg.inviteCode) {
-    return html(ctx, views.errorPage(ctx, 403, 'Sign-up is closed. The administrator needs to set INVITE_CODE in the .env file.'), 403);
-  }
-  html(ctx, views.registerPage(ctx, { needsInvite }));
-});
-
-route('POST', '/register', async (ctx) => {
-  const form = await readForm(ctx.req);
-  const values = Object.fromEntries(['name', 'email', 'invite'].map((k) => [k, (form.get(k) || '').trim()]));
-  const password = form.get('password') || '';
-  const needsInvite = registrationNeedsInvite();
-  const fail = (error) => html(ctx, views.registerPage(ctx, { values, error, needsInvite }), 400);
-
-  if (needsInvite && (!cfg.inviteCode || values.invite !== cfg.inviteCode)) return fail('The invite code is not valid.');
-  if (!values.name) return fail('Enter your name.');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) return fail('The email address is not valid.');
-  if (password.length < 8) return fail('The password must be at least 8 characters long.');
-  if (db.prepare('SELECT 1 FROM users WHERE email=?').get(values.email)) return fail('An account with this email already exists.');
-
-  const r = db
-    .prepare('INSERT INTO users (email, name, password_hash, created_at) VALUES (?, ?, ?, ?)')
-    .run(values.email, values.name.slice(0, 60), sec.hashPassword(password), db.now());
-  ctx.session = { uid: Number(r.lastInsertRowid) };
-  flash(ctx, 'ok', `Welcome, ${values.name}! Copy a recording into the folder below and scan it to get started.`);
-  redirect(ctx, '/recordings');
-});
-
-route('POST', '/logout', (ctx) => {
-  ctx.session = {};
-  redirect(ctx, '/login');
-});
+route('GET', '/', (ctx) => redirect(ctx, '/recordings'));
 
 // ── Rute: snimci i Shorts ─────────────────────────────────
 const MEDIA_MIME = {
@@ -261,8 +184,7 @@ route(
       r.hasThumb = fs.existsSync(studio.thumbPath('rec', r.id));
     }
     html(ctx, views.recordingsPage(ctx, { recordings, ffmpegOk: media.isAvailable(), folder: cfg.recordingsDir }));
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -272,8 +194,7 @@ route(
     const added = studio.scan(ctx.user.id);
     flash(ctx, 'ok', added ? `Added ${added} new ${added === 1 ? 'recording' : 'recordings'}.` : 'No new recordings found in the folder.');
     redirect(ctx, '/recordings');
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -286,8 +207,7 @@ route(
     const clips = db.prepare('SELECT * FROM clips WHERE recording_id=? AND user_id=? ORDER BY id DESC').all(rec.id, ctx.user.id);
     rec.hasThumb = fs.existsSync(studio.thumbPath('rec', rec.id));
     html(ctx, views.recordingPage(ctx, { rec, moments, clips: withThumbs(clips), ffmpegOk: media.isAvailable() }));
-  },
-  { auth: true }
+  }
 );
 
 function withThumbs(clips) {
@@ -302,8 +222,7 @@ route(
     const rec = userRecording(ctx);
     if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
     sendFile(ctx, studio.thumbPath('rec', rec.id));
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -313,8 +232,7 @@ route(
     const clip = userClip(ctx);
     if (!clip) return html(ctx, views.errorPage(ctx, 404, 'This Short does not exist.'), 404);
     sendFile(ctx, studio.thumbPath('clip', clip.id));
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -324,8 +242,7 @@ route(
     const rec = userRecording(ctx);
     if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
     sendFile(ctx, rec.path);
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -339,8 +256,7 @@ route(
       studio.tick();
     }
     redirect(ctx, `/recordings/${rec.id}`);
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -360,8 +276,7 @@ route(
     });
     flash(ctx, 'ok', `“${rec.name}” was removed from the list. The file is still on disk.`);
     redirect(ctx, '/recordings');
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -389,8 +304,7 @@ route(
     studio.createClip(rec, { title, start, end: Math.min(end, rec.duration), layout });
     flash(ctx, 'ok', `Short “${title}” is being created.`);
     redirect(ctx, back);
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -399,8 +313,7 @@ route(
   (ctx) => {
     const clips = db.prepare('SELECT * FROM clips WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
     html(ctx, views.shortsPage(ctx, { clips: withThumbs(clips), ffmpegOk: media.isAvailable() }));
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -410,8 +323,7 @@ route(
     const clip = userClip(ctx);
     if (!clip || clip.status !== 'ready') return html(ctx, views.errorPage(ctx, 404, 'This Short does not exist.'), 404);
     sendFile(ctx, clip.path, ctx.query.get('download') ? `${clip.title.replace(/[\\/:*?"<>|]/g, ' ')}.mp4` : null);
-  },
-  { auth: true }
+  }
 );
 
 route(
@@ -430,8 +342,7 @@ route(
     db.prepare('DELETE FROM clips WHERE id=?').run(clip.id);
     flash(ctx, 'ok', 'The Short has been deleted.');
     redirect(ctx, back);
-  },
-  { auth: true }
+  }
 );
 
 // Stanje poslova za osvježavanje stranica bez ponovnog učitavanja.
@@ -450,8 +361,7 @@ route(
         ...clips.map((c) => ({ key: `clip:${c.id}`, status: c.status, progress: c.progress })),
       ],
     });
-  },
-  { auth: true }
+  }
 );
 
 // ── Javne stranice ────────────────────────────────────────
@@ -470,7 +380,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(cfg.port, () => {
+server.listen(cfg.port, cfg.host, () => {
   console.log(`\n  ${cfg.appName} is running at ${cfg.baseUrl}`);
   if (!media.isAvailable()) console.log('  ⚠ ffmpeg was not found: recordings cannot be analyzed or cut into Shorts.');
   console.log('');

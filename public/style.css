@@ -63,8 +63,6 @@ code { background: var(--bg); padding: 0.1em 0.35em; border-radius: 4px; font-si
 .top nav a { padding: 0.4rem 0.75rem; border-radius: 8px; color: var(--muted); text-decoration: none; font-weight: 500; }
 .top nav a:hover { color: var(--text); background: var(--bg); }
 .top nav a.active { color: var(--text); background: var(--bg); }
-.logout { display: flex; align-items: center; gap: 0.75rem; }
-.who { color: var(--muted); font-size: 0.9rem; }
 
 main { max-width: 1040px; margin: 0 auto; padding: 1.75rem clamp(16px, 4vw, 40px) 3rem; }
 .foot { text-align: center; color: var(--muted); font-size: 0.85rem; padding: 2rem 16px; }
@@ -162,12 +160,31 @@ p.error { background: var(--bad-bg); padding: 0.65rem 0.85rem; border-radius: 8p
 .tl-wave { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--muted); opacity: 0.5; }
 .tl-mark { position: absolute; top: 0; bottom: 0; min-width: 5px; padding: 0; border: 0; border-top: 3px solid var(--accent); border-radius: 0; background: color-mix(in srgb, var(--accent) 30%, transparent); }
 .tl-made { position: absolute; bottom: 0; height: 4px; min-width: 5px; background: var(--ok); }
-.tl-live { height: 96px; cursor: pointer; }
+.tl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-bottom: 0.6rem; }
+.tl-group { display: flex; }
+.tl-group button { border-radius: 0; margin-left: -1px; padding: 0.35rem 0.7rem; font-variant-numeric: tabular-nums; }
+.tl-group button:first-child { margin-left: 0; border-radius: 8px 0 0 8px; }
+.tl-group button:last-child { border-radius: 0 8px 8px 0; }
+.tl-group button:hover, .tl-group button.is-picked { position: relative; }
+.tl-tools button.is-picked { border-color: var(--accent); color: var(--accent); }
+.tl-tools > button { padding: 0.35rem 0.7rem; }
+.tl-zoom { margin-left: auto; }
+.tl-scroll { overflow-x: auto; overflow-y: hidden; border-radius: 6px; }
+.tl-inner { min-width: 100%; }
+.tl-live { height: 96px; cursor: crosshair; touch-action: none; user-select: none; }
 .tl-live .tl-mark { cursor: pointer; }
 .tl-live .tl-mark:hover, .tl-live .tl-mark:focus-visible { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 60%, transparent); outline: 0; }
-.tl-selection { position: absolute; top: 0; bottom: 0; border: 2px solid var(--text); border-radius: 3px; pointer-events: none; }
+.tl-selection { position: absolute; top: 0; bottom: 0; min-width: 4px; border: 2px solid var(--text); border-radius: 3px; background: color-mix(in srgb, var(--text) 14%, transparent); cursor: grab; }
+.tl-selection:active { cursor: grabbing; }
+.tl-selection:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tl-handle { position: absolute; top: 0; bottom: 0; width: 9px; background: var(--text); cursor: ew-resize; }
+.tl-selection.is-narrow .tl-handle { display: none; }
+.tl-handle[data-edge="start"] { left: -2px; border-radius: 3px 0 0 3px; }
+.tl-handle[data-edge="end"] { right: -2px; border-radius: 0 3px 3px 0; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--text); pointer-events: none; }
 .tl-scale { display: flex; justify-content: space-between; margin-top: 0.25rem; color: var(--muted); font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+.tl-scale.is-drawn { position: relative; display: block; height: 1.3em; }
+.tl-scale.is-drawn span { position: absolute; padding-left: 4px; border-left: 1px solid var(--border); }
 .moments { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0; padding: 0; list-style: none; }
 .moment { font-variant-numeric: tabular-nums; }
 .moment.is-picked { border-color: var(--accent); color: var(--accent); }

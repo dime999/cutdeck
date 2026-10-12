@@ -1,11 +1,11 @@
 'use strict';
 // Snimci i Shorts: skeniranje foldera, analiza i rezanje. Radi jedan ffmpeg posao istovremeno.
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const cfg = require('./config');
 const db = require('./db');
 const media = require('./media');
-const { randomId } = require('./security');
 
 const VIDEO_EXT = /\.(mp4|mov|m4v|mkv|webm|avi|mts|ts)$/i;
 const MIN_CLIP = 3;
@@ -47,7 +47,7 @@ function createClip(rec, { title, start, end, layout }) {
     .prepare(
       'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, path.join(cfg.shortsDir, `${randomId()}.mp4`), db.now());
+    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`), db.now());
   tick();
   return Number(r.lastInsertRowid);
 }
