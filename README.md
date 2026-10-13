@@ -45,6 +45,7 @@ Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga s
    Dio možeš izabrati i sam: povuci mišem preko trake, pa izbor pomjeri ili mu skrati rubove. Dugmad **15 s, 30 s, 45 s, 1 min** postave dužinu, a zum uveća traku za precizan rez.
 4. Izaberi raspored i klikni **Create Short**.
 5. Gotov Short je na stranici **Shorts**: možeš ga pogledati i skinuti dugmetom **Download**.
+6. Za brisanje više Shortsa odjednom označi kvačice na pločicama (ili **Select all**) i klikni **Delete selected**.
 
 **Sve jednim klikom.** Ispod naslova u istoj formi možeš uključiti **Add captions from the voice** i izabrati intro i outro. Tada **Create Short** uradi sve redom: izreže Short, prepozna govor i upiše titlove (u stilu koji si zadnji put sačuvao na stranici titlova), pa doda intro i outro. Gotov rezultat je na stranici **Videos** ako ima intro ili outro, a inače na stranici **Shorts**. Izbor se pamti za sljedeći put. Međukoraci (Short bez titlova i Short s titlovima) ostaju na stranici Shorts.
 

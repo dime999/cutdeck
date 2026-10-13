@@ -11,11 +11,71 @@ function localizeTimes(root) {
 }
 localizeTimes(document);
 
-// Potvrda prije opasnih akcija
+// Potvrda prije opasnih akcija: prozor u stilu aplikacije umjesto sistemskog.
+// Tekst iz data-confirm se dijeli na pitanje (do prvog upitnika) i objašnjenje.
+const confirmDialog = document.createElement('dialog');
+confirmDialog.className = 'confirm';
+confirmDialog.innerHTML = `<form method="dialog">
+  <h2 id="confirm-title"></h2>
+  <p id="confirm-text"></p>
+  <div class="confirm-actions">
+    <button value="cancel">Cancel</button>
+    <button value="ok" id="confirm-ok"></button>
+  </div>
+</form>`;
+confirmDialog.setAttribute('aria-labelledby', 'confirm-title');
+document.body.append(confirmDialog);
+
+let confirmed = null; // forma čije je slanje korisnik upravo potvrdio
 document.addEventListener('submit', (e) => {
   const form = e.target.closest('form[data-confirm]');
-  if (form && !confirm(form.dataset.confirm)) e.preventDefault();
+  if (!form) return;
+  if (confirmed === form) {
+    confirmed = null;
+    return;
+  }
+  e.preventDefault();
+  const submitter = e.submitter;
+  const message = form.dataset.confirm;
+  const cut = message.indexOf('?') + 1;
+  confirmDialog.querySelector('#confirm-title').textContent = cut ? message.slice(0, cut) : message;
+  confirmDialog.querySelector('#confirm-text').textContent = cut ? message.slice(cut).trim() : '';
+  const ok = confirmDialog.querySelector('#confirm-ok');
+  // Dugme za potvrdu nosi naziv akcije koju potvrđuje, npr. „Delete“.
+  ok.textContent = (submitter && submitter.textContent.trim()) || 'Continue';
+  ok.className = submitter && submitter.classList.contains('danger-outline') ? 'danger' : 'primary';
+  confirmDialog.onclose = () => {
+    if (confirmDialog.returnValue !== 'ok') return;
+    confirmed = form;
+    form.requestSubmit(submitter && submitter.form === form ? submitter : undefined);
+  };
+  confirmDialog.returnValue = '';
+  confirmDialog.showModal();
+  confirmDialog.querySelector('button[value="cancel"]').focus(); // sigurniji izbor je unaprijed označen
 });
+
+// ── Označavanje više Shortsa za brisanje ──────────────────
+function updateBulk() {
+  const form = document.getElementById('bulk-form');
+  if (!form) return;
+  const boxes = [...document.querySelectorAll('input[name="ids"][form="bulk-form"]')];
+  const picked = boxes.filter((b) => b.checked).length;
+  for (const b of boxes) b.closest('.short')?.classList.toggle('is-selected', b.checked);
+  const all = document.getElementById('bulk-all');
+  all.checked = boxes.length > 0 && picked === boxes.length;
+  all.indeterminate = picked > 0 && picked < boxes.length;
+  document.getElementById('bulk-count').textContent = picked ? `${picked} selected` : 'None selected';
+  document.getElementById('bulk-delete').disabled = !picked;
+  form.dataset.confirm = `Delete ${picked} ${picked === 1 ? 'Short' : 'Shorts'}? The video ${picked === 1 ? 'file is' : 'files are'} deleted too, and any that are still being created are cancelled.`;
+}
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'bulk-all') {
+    for (const b of document.querySelectorAll('input[name="ids"][form="bulk-form"]')) b.checked = e.target.checked;
+  }
+  if (e.target.id === 'bulk-all' || e.target.name === 'ids') updateBulk();
+});
+document.addEventListener('live:refresh', updateBulk);
+updateBulk();
 
 // ── Snimci i Shorts ───────────────────────────────────────
 // Dok neki posao traje, osvježava trake napretka; kad se stanje promijeni,
@@ -35,7 +95,10 @@ if (studioPoll) {
       if (fresh.dataset.state) el.dataset.state = fresh.dataset.state;
       // Dio koji se nije promijenio ostaje netaknut, da se ne prekine rad na traci.
       if (fresh.dataset.rev && fresh.dataset.rev === el.dataset.rev) continue;
+      // Označene kvačice (npr. Shorts izabrani za brisanje) preživljavaju osvježavanje.
+      const checked = [...el.querySelectorAll('input[type="checkbox"]:checked')].map((b) => `${b.name}=${b.value}`);
       el.innerHTML = fresh.innerHTML;
+      for (const b of el.querySelectorAll('input[type="checkbox"]')) if (checked.includes(`${b.name}=${b.value}`)) b.checked = true;
       if (fresh.dataset.rev) el.dataset.rev = fresh.dataset.rev;
       localizeTimes(el);
     }

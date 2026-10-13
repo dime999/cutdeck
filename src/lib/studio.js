@@ -432,4 +432,4 @@ function cancelShorts(userId) {
   return unfinished.length;
 }
 
-module.exports = { MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, cancelClip, cancelShorts, start, tick };
+module.exports = { MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };

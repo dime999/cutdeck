@@ -165,6 +165,7 @@ function shortTiles(clips, { from = '' } = {}) {
         frame = `<div class="short-frame is-busy"><p>${c.status === 'rendering' ? 'Creating…' : 'Waiting its turn'}</p>${c.status === 'rendering' ? progressBar(c.progress) : ''}</div>`;
       }
       return `<li class="short" data-poll-key="clip:${c.id}" data-state="${h(c.status)}">
+      <label class="pick"><input type="checkbox" name="ids" value="${c.id}" form="bulk-form" aria-label="Select “${h(c.title)}”"></label>
       ${frame}
       <strong class="short-title">${h(c.title)}</strong>
       ${meta(c.published ? PUBLISHED : '', c.status === 'ready' && c.followup ? '<span class="chip info">More steps coming</span>' : '', `${h(c.recording_name)} at ${fmtTime(c.start_s)}`, c.size ? fmtSize(c.size) : '')}
@@ -186,7 +187,14 @@ function shortTiles(clips, { from = '' } = {}) {
     </li>`;
     })
     .join('');
-  return `<ul class="shorts">${tiles}</ul>`;
+  // Traka za označavanje: kvačica na svakoj pločici pripada ovoj formi (atribut form).
+  const recording = from === 'recording' && clips.length ? clips[0].recording_id : '';
+  return `<form method="post" action="/shorts/delete${recording ? `?recording=${recording}` : ''}" id="bulk-form" class="bulk-bar" data-confirm="Delete the selected Shorts?">
+    <label class="check"><input type="checkbox" id="bulk-all"> Select all</label>
+    <span class="muted" id="bulk-count">None selected</span>
+    <button class="danger-outline" id="bulk-delete" disabled>Delete selected</button>
+  </form>
+  <ul class="shorts">${tiles}</ul>`;
 }
 
 function recordingsPage(ctx, { recordings, ffmpegOk, folder }) {

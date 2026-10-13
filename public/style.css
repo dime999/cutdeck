@@ -212,6 +212,25 @@ p.error { padding: 0.6rem 0.8rem; border-radius: var(--r-control); background: c
 .queue-bar form { margin: 0; }
 .queue-bar button { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
 
+/* Označavanje više Shortsa */
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin: 0 0 1rem; }
+.bulk-bar .check { margin: 0; font-weight: 500; }
+.bulk-bar button { margin-left: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+.short { position: relative; }
+.pick { position: absolute; top: 8px; left: 8px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; margin: 0; border-radius: var(--r-control); background: rgb(0 0 0 / 55%); cursor: pointer; }
+.pick input { width: 16px; height: 16px; margin: 0; accent-color: var(--sky); cursor: pointer; }
+.short.is-selected .short-frame { outline-color: var(--sky); }
+
+/* Prozor za potvrdu */
+.confirm { width: min(420px, calc(100vw - 2rem)); padding: 1.25rem 1.35rem 1.1rem; border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--panel); color: var(--text); box-shadow: 0 24px 60px rgb(0 0 0 / 55%); }
+.confirm::backdrop { background: rgb(10 11 12 / 62%); backdrop-filter: blur(2px); }
+.confirm h2 { margin: 0 0 0.5rem; font-size: 1.25rem; overflow-wrap: anywhere; }
+.confirm p { margin: 0; color: var(--muted); }
+.confirm p:empty { display: none; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }
+.danger { border-color: var(--bad); background: var(--bad); color: #2a0606; }
+.danger:hover { border-color: #ff8a8a; background: #ff8a8a; }
+
 /* ── Pločice: Shorts (9:16), thumbnailovi i videi (16:9) ── */
 .shorts { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 1.6rem 1rem; margin: 0; padding: 0; list-style: none; }
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.6rem 1rem; margin: 0; padding: 0; list-style: none; }

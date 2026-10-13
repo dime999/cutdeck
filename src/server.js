@@ -359,6 +359,24 @@ route(
   }
 );
 
+// Briše sve označene Shortse; oni koji se još prave ili čekaju se prekidaju.
+route('POST', '/shorts/delete', async (ctx) => {
+  const form = await readForm(ctx.req);
+  const ids = [...new Set(form.getAll('ids').map(Number))].filter(Number.isInteger).slice(0, 500);
+  const find = db.prepare('SELECT * FROM clips WHERE id=? AND user_id=?');
+  let removed = 0;
+  for (const id of ids) {
+    const clip = find.get(id, ctx.user.id);
+    if (!clip) continue;
+    if (clip.status === 'pending' || clip.status === 'rendering') studio.cancelClip(clip);
+    else studio.deleteClip(clip);
+    removed++;
+  }
+  flash(ctx, removed ? 'ok' : 'bad', removed ? `${removed} ${removed === 1 ? 'Short has' : 'Shorts have'} been deleted.` : 'Select at least one Short to delete.');
+  const rec = Number(ctx.query.get('recording'));
+  redirect(ctx, rec ? `/recordings/${rec}` : '/shorts');
+});
+
 // Prekida jedan Short koji čeka ili se upravo pravi.
 route('POST', '/clips/:id/cancel', (ctx) => {
   const clip = userClip(ctx);
