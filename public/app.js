@@ -47,8 +47,19 @@ if (studioPoll) {
       const r = await fetch(statusUrl);
       if (!r.ok) return;
       let changed = false;
-      for (const item of (await r.json()).items) {
+      const items = (await r.json()).items;
+      // Stavka vrste koju ova stranica nabraja a nema je na stranici (ili obrnuto) znači da se lista promijenila:
+      // npr. pojavio se Short sa titlovima ili je međukorak obrisan.
+      const marker = document.querySelector('[data-studio-poll]');
+      const kinds = (marker?.dataset.pollKinds || '').split(',').filter(Boolean);
+      const listed = (key) => kinds.includes(key.split(':')[0]);
+      const known = new Set(items.map((item) => item.key));
+      for (const el of document.querySelectorAll('[data-poll-key]')) {
+        if (listed(el.dataset.pollKey) && !known.has(el.dataset.pollKey)) changed = true;
+      }
+      for (const item of items) {
         const el = document.querySelector(`[data-poll-key="${item.key}"]`);
+        if (!el && listed(item.key)) changed = true;
         if (!el) continue;
         if (el.dataset.state !== item.status) changed = true;
         const bar = el.querySelector('.progress .bar');
@@ -739,9 +750,42 @@ for (const field of chainFields) {
   const saved = localStorage.getItem(key);
   if (saved !== null && !field.disabled) {
     if (field.type === 'checkbox') field.checked = saved === '1';
-    else if ([...field.options].some((o) => o.value === saved)) field.value = saved;
+    else if (!field.options || [...field.options].some((o) => o.value === saved)) field.value = saved; // lista: samo ako ta opcija još postoji
   }
   field.addEventListener('change', () => localStorage.setItem(key, field.type === 'checkbox' ? (field.checked ? '1' : '0') : field.value));
+}
+
+// ── Dijeljenje snimka: koliko će Shortsa nastati ──────────
+const splitForm = document.getElementById('split-form');
+if (splitForm) {
+  const duration = Number(splitForm.dataset.duration);
+  const lengthInput = document.getElementById('split-length');
+  const count = document.getElementById('split-count');
+  const submit = document.getElementById('split-submit');
+  // Isto pravilo kao na serveru (studio.js, splitRanges).
+  function parts(length) {
+    if (!(length >= 5) || length > 180) return 0;
+    const full = Math.floor(duration / length);
+    if (full === 0) return duration >= 3 ? 1 : 0;
+    const rest = duration - full * length;
+    return full + (rest >= Math.max(3, length * 0.25) ? 1 : 0);
+  }
+  function update() {
+    const length = Number(lengthInput.value);
+    const n = parts(length);
+    for (const b of document.querySelectorAll('[data-split-length]')) b.classList.toggle('is-picked', Number(b.dataset.splitLength) === length);
+    count.textContent = n ? `This makes ${n} ${n === 1 ? 'Short' : 'Shorts'}.` : 'Enter a length between 5 and 180 seconds.';
+    submit.textContent = n ? `Create ${n} ${n === 1 ? 'Short' : 'Shorts'}` : 'Create Shorts';
+    submit.disabled = !n;
+  }
+  lengthInput.addEventListener('input', update);
+  document.addEventListener('click', (e) => {
+    const button = e.target.closest('button[data-split-length]');
+    if (!button) return;
+    lengthInput.value = button.dataset.splitLength;
+    update();
+  });
+  update();
 }
 
 // Pregled Shorta dok je miš iznad njega

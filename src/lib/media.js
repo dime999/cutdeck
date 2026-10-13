@@ -164,11 +164,13 @@ function shortFilter(layout) {
   return `[0:v]${fill},crop=${OUT_W}:${OUT_H}:${x}:0,setsar=1[v]`;
 }
 
-function renderArgs({ input, output, start, duration, layout }) {
+function renderArgs({ input, output, start, duration, layout, overlayFile = null }) {
+  // Natpis (npr. PART 1) se crta preko gotovog vertikalnog kadra.
+  const filter = overlayFile ? shortFilter(layout).replace(/\[v\]$/, `,ass=${filterPath(overlayFile)}[v]`) : shortFilter(layout);
   return [
     '-hide_banner', '-nostdin', '-v', 'error', '-y',
     '-ss', String(start), '-i', input, '-t', String(duration),
-    '-filter_complex', shortFilter(layout), '-map', '[v]', '-map', '0:a:0?',
+    '-filter_complex', filter, '-map', '[v]', '-map', '0:a:0?',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
     '-progress', 'pipe:1', '-nostats', output,
@@ -181,9 +183,15 @@ const progressParser = (total, onProgress) => (chunk) => {
   if (m) onProgress(Math.min(1, Number(m[1]) / 1e6 / total));
 };
 
-/** Reže dio snimka u vertikalni 1080×1920 MP4. */
-async function renderShort(job, onProgress) {
-  await run(cfg.ffmpeg, renderArgs(job), progressParser(job.duration, onProgress));
+/** Reže dio snimka u vertikalni 1080×1920 MP4. `job.overlay` je sadržaj ASS fajla koji se crta preko slike. */
+async function renderShort(job, onProgress, signal) {
+  const overlayFile = job.overlay ? path.join(cfg.tmpDir, `label-${crypto.randomBytes(8).toString('hex')}.ass`) : null;
+  if (overlayFile) fs.writeFileSync(overlayFile, job.overlay);
+  try {
+    await run(cfg.ffmpeg, renderArgs({ ...job, overlayFile }), progressParser(job.duration, onProgress), signal);
+  } finally {
+    if (overlayFile) fs.rm(overlayFile, { force: true }, () => {});
+  }
 }
 
 /**
@@ -314,7 +322,7 @@ function groupWords(words) {
  * Prepoznaje engleski govor u videu. Vraća redove [{start, end, text, words}] sa vremenima
  * u sekundama; `words` su riječi reda sa svojim vremenima, za isticanje izgovorene riječi.
  */
-async function transcribe(file, duration, onProgress) {
+async function transcribe(file, duration, onProgress, signal) {
   const out = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.json`);
   // max_len=1 daje jedan zapis po riječi; u redove ih slaže groupWords.
   const options = [`model=${filterPath(cfg.whisperModel)}`, 'language=en', 'queue=20', 'max_len=1', `destination=${filterPath(out)}`, 'format=json'];
@@ -322,7 +330,8 @@ async function transcribe(file, duration, onProgress) {
     await run(
       cfg.ffmpeg,
       ['-hide_banner', '-nostdin', '-v', 'error', '-i', file, '-vn', '-af', `whisper=${options.join(':')}`, '-progress', 'pipe:1', '-nostats', '-f', 'null', '-'],
-      progressParser(duration, onProgress)
+      progressParser(duration, onProgress),
+      signal
     );
     const text = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
     const words = [];
@@ -390,8 +399,32 @@ function buildAss(lines, style, { width, height }) {
   ].join('\n');
 }
 
+/** ASS fajl sa jednim natpisom koji stoji cijelo vrijeme, npr. „PART 3“. */
+function buildLabelAss({ text, position }, { width, height }) {
+  const size = Math.round(height * 0.058);
+  const top = position !== 'bottom';
+  // Gore se ostavlja mjesta za ikone koje YouTube crta preko Shorta.
+  const marginV = Math.round(height * (top ? 0.07 : 0.12));
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${width}`,
+    `PlayResY: ${height}`,
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Default,Impact,${size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${Math.round(size * 0.09)},0,${top ? 8 : 2},40,40,${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    `Dialogue: 0,0:00:00.00,9:59:59.00,Default,,0,0,0,,${String(text).replace(/[{}\\]/g, '')}`,
+    '',
+  ].join('\n');
+}
+
 /** Upisuje titlove (sadržaj ASS fajla) u sliku videa. Zvuk se prenosi bez promjene. */
-async function renderCaptioned({ input, output, subtitles, duration }, onProgress) {
+async function renderCaptioned({ input, output, subtitles, duration }, onProgress, signal) {
   const assFile = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.ass`);
   fs.writeFileSync(assFile, subtitles);
   try {
@@ -404,7 +437,8 @@ async function renderCaptioned({ input, output, subtitles, duration }, onProgres
         '-c:a', 'copy', '-movflags', '+faststart',
         '-progress', 'pipe:1', '-nostats', output,
       ],
-      progressParser(duration, onProgress)
+      progressParser(duration, onProgress),
+      signal
     );
   } finally {
     fs.rm(assFile, { force: true }, () => {});
@@ -432,5 +466,6 @@ module.exports = {
   transcribe,
   tidyLines,
   buildAss,
+  buildLabelAss,
   renderCaptioned,
 };

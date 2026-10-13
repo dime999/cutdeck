@@ -93,7 +93,23 @@ const ffmpegNotice = (ok) =>
     : `<div class="notice warn"><strong>ffmpeg is not installed.</strong> The app needs it to analyze recordings and cut Shorts. Install it (on Windows: <code>winget install Gyan.FFmpeg</code>), then restart the app.</div>`;
 
 // Element koji uključuje osvježavanje stanja dok neki posao traje.
-const studioPoll = (busy, recordingId = '') => (busy ? `<div data-studio-poll="${recordingId}" hidden></div>` : '');
+// `kinds` su vrste stavki koje stranica nabraja (npr. 'clip'), da preglednik primijeti kad se neka pojavi ili nestane.
+const studioPoll = (busy, recordingId = '', kinds = '') => (busy ? `<div data-studio-poll="${recordingId}" data-poll-kinds="${kinds}" hidden></div>` : '');
+
+// Short je u toku dok se pravi ili dok ga još čekaju titlovi, intro ili outro.
+const inProgress = (c) => c.status === 'pending' || c.status === 'rendering' || Boolean(c.followup);
+
+// Traka iznad pločica dok se Shorts prave, sa dugmetom za prekid.
+function queueBar(clips, recordingId = '') {
+  const unfinished = clips.filter((c) => c.status === 'pending' || c.status === 'rendering').length;
+  const chained = clips.filter((c) => c.status === 'ready' && c.followup).length;
+  if (!unfinished && !chained) return '';
+  const what = [unfinished && `${unfinished} ${unfinished === 1 ? 'Short' : 'Shorts'} still to be created`, chained && `${chained} waiting for captions, intro or outro`].filter(Boolean).join(', ');
+  return `<div class="queue-bar">
+    <span>${what}.</span>
+    <form method="post" action="/shorts/cancel${recordingId ? `?recording=${recordingId}` : ''}" data-confirm="Stop creating Shorts? The ones that are not finished are removed, and no more captions, intros or outros are added. Finished Shorts stay."><button class="danger-outline">Stop creating Shorts</button></form>
+  </div>`;
+}
 
 const meta = (...parts) => `<p class="meta">${parts.filter(Boolean).map((p) => `<span>${p}</span>`).join('')}</p>`;
 
@@ -151,7 +167,7 @@ function shortTiles(clips, { from = '' } = {}) {
       return `<li class="short" data-poll-key="clip:${c.id}" data-state="${h(c.status)}">
       ${frame}
       <strong class="short-title">${h(c.title)}</strong>
-      ${meta(c.published ? PUBLISHED : '', `${h(c.recording_name)} at ${fmtTime(c.start_s)}`, c.size ? fmtSize(c.size) : '')}
+      ${meta(c.published ? PUBLISHED : '', c.status === 'ready' && c.followup ? '<span class="chip info">More steps coming</span>' : '', `${h(c.recording_name)} at ${fmtTime(c.start_s)}`, c.size ? fmtSize(c.size) : '')}
       <div class="short-actions">
         ${
           c.status === 'ready'
@@ -162,8 +178,8 @@ function shortTiles(clips, { from = '' } = {}) {
             : ''
         }
         ${
-          c.status === 'rendering'
-            ? ''
+          c.status === 'rendering' || c.status === 'pending'
+            ? `<form method="post" action="/clips/${c.id}/cancel${from ? `?from=${from}` : ''}"><button>Cancel</button></form>`
             : `<form method="post" action="/clips/${c.id}/delete${from ? `?from=${from}` : ''}" data-confirm="Delete the Short “${h(c.title)}”? Its video file will be deleted too."><button class="danger-outline">Delete</button></form>`
         }
       </div>
@@ -276,7 +292,7 @@ ${
     : `<p class="small muted">${h(rec.error || 'No moment stands out in this recording. Play it and set the start and end yourself.')}</p>`
 }`;
   }
-  const busy = rec.status === 'pending' || rec.status === 'analyzing' || clips.some((c) => c.status === 'pending' || c.status === 'rendering');
+  const busy = rec.status === 'pending' || rec.status === 'analyzing' || clips.some(inProgress);
 
   return layout(
     ctx,
@@ -284,7 +300,8 @@ ${
     `<div class="page-head">
   <h1>${h(rec.name)}</h1>
   <div class="head-actions">
-    ${rec.status === 'ready' ? `<a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">Create thumbnail</a>
+    ${rec.status === 'ready' ? `<a class="button primary" href="/recordings/${rec.id}/split">Split into Shorts</a>
+    <a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">Create thumbnail</a>
     <a class="button" href="/videos/new?recording=${rec.id}">Add intro and outro</a>
     <a class="button" href="/publish/recording/${rec.id}">Publish kit</a>` : ''}
     <a class="button" href="/recordings">All recordings</a>
@@ -328,14 +345,15 @@ ${ffmpegNotice(ffmpegOk)}
 
 <div id="live-clips" data-live>
   <h2>Shorts from this recording</h2>
+  ${queueBar(clips, rec.id)}
   ${clips.length ? shortTiles(clips, { from: 'recording' }) : '<div class="empty">Pick a moment above and select “Create Short”.</div>'}
-  ${studioPoll(busy && ffmpegOk, rec.id)}
+  ${studioPoll(busy && ffmpegOk, rec.id, 'clip')}
 </div>`
   );
 }
 
 function shortsPage(ctx, { clips, ffmpegOk }) {
-  const busy = clips.some((c) => c.status === 'pending' || c.status === 'rendering');
+  const busy = clips.some(inProgress);
   return layout(
     ctx,
     'Shorts',
@@ -345,8 +363,9 @@ function shortsPage(ctx, { clips, ffmpegOk }) {
 </div>
 ${ffmpegNotice(ffmpegOk)}
 <div id="live-clips" data-live>
+${queueBar(clips)}
 ${clips.length ? shortTiles(clips) : '<div class="empty">Open a recording, pick a moment and create your first Short.</div>'}
-${studioPoll(busy && ffmpegOk)}
+${studioPoll(busy && ffmpegOk, '', 'clip')}
 </div>`
   );
 }
@@ -806,6 +825,62 @@ function kitPage(ctx, { item, kit, thumbnails, isNew }) {
   );
 }
 
+// ── Dijeljenje cijelog snimka na Shorts ───────────────────
+function splitPage(ctx, { rec, bumpers, captionsProblem, ffmpegOk }) {
+  const bumperOptions = bumpers.map((b) => `<option value="${b.id}">${h(b.name)} (${fmtTime(b.duration)})</option>`).join('');
+  const presets = [[15, '15 s'], [30, '30 s'], [45, '45 s'], [60, '1 min'], [90, '1 min 30 s'], [180, '3 min']];
+  return layout(
+    ctx,
+    'Split into Shorts',
+    `<div class="page-head">
+  <h1>Split into Shorts</h1>
+  <a class="button" href="/recordings/${rec.id}">Back to the recording</a>
+</div>
+${ffmpegNotice(ffmpegOk)}
+<section class="card form-card">
+  <p class="form-source"><strong>${h(rec.name)}</strong></p>
+  ${meta(fmtTime(rec.duration), `${rec.width}×${rec.height}`)}
+  <form method="post" action="/recordings/${rec.id}/split" class="stack" id="split-form" data-duration="${rec.duration}">
+    <div>
+      <label for="split-length">Length of each part, in seconds</label>
+      <div class="row">
+        <input type="number" name="length" id="split-length" min="5" max="180" step="1" value="60" required>
+        <div class="tl-group" role="group" aria-label="Common lengths">
+          ${presets.map(([s, label]) => `<button type="button" data-split-length="${s}">${label}</button>`).join('')}
+        </div>
+      </div>
+      <p class="muted small" id="split-count" aria-live="polite"></p>
+    </div>
+    <label>Layout
+      <select name="layout" data-remember="split-layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
+    </label>
+    <label>Title <span class="muted">(each Short gets “- Part 1”, “- Part 2”… after it)</span>
+      <input name="prefix" maxlength="80" value="${h(rec.name.replace(/\.[^.]+$/, ''))}">
+    </label>
+
+    <h2>Part number on the video</h2>
+    <label class="check"><input type="checkbox" name="label" value="1" data-remember="split-label" checked> Write the part number on each Short</label>
+    <div class="cap-style">
+      <label>Word<input name="label_word" maxlength="20" value="PART" data-remember="split-word"></label>
+      <label>Position
+        <select name="label_position" data-remember="split-position"><option value="top">Top</option><option value="bottom">Bottom</option></select>
+      </label>
+    </div>
+    <p class="muted small">Shown for the whole Short as “PART 1”, “PART 2” and so on. Keep it away from the captions: they use the position you saved on a captions page.</p>
+
+    <h2>Then, without more clicks</h2>
+    <label class="check"><input type="checkbox" name="auto_captions" value="1" data-remember="auto-captions"${captionsProblem ? ' disabled' : ''}> Add captions from the voice</label>
+    ${captionsProblem ? `<p class="muted small">Captions are not available yet: ${h(captionsProblem)}</p>` : ''}
+    <label>Intro<select name="auto_intro" data-remember="auto-intro"><option value="">No intro</option>${bumperOptions}</select></label>
+    <label>Outro<select name="auto_outro" data-remember="auto-outro"><option value="">No outro</option>${bumperOptions}</select></label>
+
+    <p class="muted small">Every part is cut and encoded as its own video, so a long recording takes a while. A leftover of a few seconds at the end is added to the last part.</p>
+    <button class="primary big" id="split-submit">Create Shorts</button>
+  </form>
+</section>`
+  );
+}
+
 // ── Pravne stranice ───────────────────────────────────────
 function privacyPage(ctx) {
   const contact = cfg.contactEmail ? `<a href="mailto:${h(cfg.contactEmail)}">${h(cfg.contactEmail)}</a>` : 'the person who runs this copy of the app';
@@ -881,6 +956,7 @@ module.exports = {
   videoMergePage,
   captionsPage,
   kitPage,
+  splitPage,
   videosPage,
   privacyPage,
   termsPage,

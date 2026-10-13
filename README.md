@@ -13,6 +13,7 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Spaja više videa (snimke, Shorts, intro i outro klipove) u jedan, redom koji zadaš.
 - Pravi engleske titlove iz tvog govora u Shortu i upisuje ih u sliku, sa isticanjem riječi koja se izgovara.
 - Jednim klikom od izabranog dijela snimka pravi Short s titlovima, introm i outrom.
+- Reže cijeli snimak na Shorts zadane dužine, sa natpisom PART 1, PART 2… i titlovima.
 - Priprema paket za objavu: naslov, opis, hashtagove, tagove i thumbnail, spremne za kopiranje u YouTube Studio.
 - Nema prijave: aplikacija je za jednog korisnika i dostupna je samo sa računara na kojem radi.
 
@@ -48,6 +49,18 @@ Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga s
 **Sve jednim klikom.** Ispod naslova u istoj formi možeš uključiti **Add captions from the voice** i izabrati intro i outro. Tada **Create Short** uradi sve redom: izreže Short, prepozna govor i upiše titlove (u stilu koji si zadnji put sačuvao na stranici titlova), pa doda intro i outro. Gotov rezultat je na stranici **Videos** ako ima intro ili outro, a inače na stranici **Shorts**. Izbor se pamti za sljedeći put. Međukoraci (Short bez titlova i Short s titlovima) ostaju na stranici Shorts.
 
 Prijedlozi se zasnivaju samo na glasnoći zvuka, pa ih uvijek pregledaj prije rezanja. Uklanjanje snimka sa liste ne briše fajl sa diska.
+
+## Cijeli snimak u Shorts odjednom
+
+1. Otvori snimak i klikni **Split into Shorts**.
+2. Upiši dužinu jednog dijela u sekundama (5 do 180) ili klikni jednu od ponuđenih. Ispod polja piše koliko će Shortsa nastati.
+3. Izaberi raspored i naslov; svaki Short dobija nastavak "- Part 1", "- Part 2"…
+4. Ako želiš natpis na videu, ostavi uključeno **Write the part number on each Short** i izaberi riječ (zadano PART) i poziciju.
+5. Po želji uključi titlove i izaberi intro i outro, pa klikni **Create Shorts**.
+
+Dijelovi se završavaju jedan po jedan: svaki se izreže, dobije titlove i tek onda kreće sljedeći. Dok traje, na stranici **Shorts** je dugme **Stop creating Shorts**, koje uklanja nedovršene Shorts i zaustavlja dalje dodavanje titlova, intra i outra; gotovi ostaju. Pojedinačni Short koji čeka ili se pravi prekidaš dugmetom **Cancel** na njegovoj pločici.
+
+Ostatak od nekoliko sekundi na kraju pripaja se posljednjem dijelu, a duži ostatak postaje zaseban, kraći Short. Kad su titlovi uključeni, na stranici **Shorts** ostaju samo gotovi Shorts sa titlovima; međukoraci bez titlova se brišu. Svaki gotov Short ima svoj **Publish kit** sa već upisanim naslovom.
 
 ## Thumbnail
 

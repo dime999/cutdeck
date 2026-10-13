@@ -162,6 +162,8 @@ addColumn('clips', 'source_clip_id', 'INTEGER');
 addColumn('clips', 'subtitles', 'TEXT');
 // Lanac „napravi sve“: šta slijedi kad Short bude gotov (JSON), vidi studio.js.
 addColumn('clips', 'followup', 'TEXT');
+// Natpis koji se crta preko Shorta, npr. { text: 'PART 3', position: 'top' } (JSON).
+addColumn('clips', 'label', 'TEXT');
 
 db.now = () => new Date().toISOString();
 

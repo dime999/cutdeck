@@ -66,18 +66,27 @@ function start() {
   tickExports();
 }
 
+// Posao koji upravo radi u ovoj traci, da se može prekinuti: { kind, id, controller }.
+let current = null;
+
 function tick() {
   if (busy || !media.isAvailable()) return;
-  // Shorts imaju prednost: korisnik ih čeka, a analiza novih snimaka može kasnije.
-  const clip = db.prepare("SELECT id FROM clips WHERE status='pending' ORDER BY id LIMIT 1").get();
-  const cap = clip ? null : db.prepare("SELECT id FROM captions WHERE status='pending' ORDER BY id LIMIT 1").get();
-  const rec = clip || cap ? null : db.prepare("SELECT id FROM recordings WHERE status='pending' AND hidden=0 ORDER BY id LIMIT 1").get();
+  // Započeti lanac se prvo dovrši (titlovi, pa njihovo upisivanje), tek onda se reže sljedeći Short.
+  // Tako kod dijeljenja snimka dijelovi izlaze gotovi jedan po jedan, a ne svi tek na kraju.
+  const pending = (sql) => db.prepare(sql).get();
+  const captioned = pending("SELECT id FROM clips WHERE status='pending' AND subtitles IS NOT NULL ORDER BY id LIMIT 1");
+  const cap = captioned ? null : pending("SELECT id FROM captions WHERE status='pending' ORDER BY id LIMIT 1");
+  const clip = captioned || (cap ? null : pending("SELECT id FROM clips WHERE status='pending' ORDER BY id LIMIT 1"));
+  const rec = clip || cap ? null : pending("SELECT id FROM recordings WHERE status='pending' AND hidden=0 ORDER BY id LIMIT 1");
   if (!clip && !cap && !rec) return;
   busy = true;
-  (clip ? renderClip(clip.id) : cap ? transcribeClip(cap.id) : analyze(rec.id))
+  const controller = new AbortController();
+  current = { kind: clip ? 'clip' : cap ? 'captions' : 'recording', id: (clip || cap || rec).id, controller };
+  (clip ? renderClip(clip.id, controller.signal) : cap ? transcribeClip(cap.id, controller.signal) : analyze(rec.id))
     .catch((e) => console.error('[studio] unexpected error', e))
     .finally(() => {
       busy = false;
+      current = null;
       setImmediate(tick);
     });
 }
@@ -121,7 +130,7 @@ async function analyze(id) {
   }
 }
 
-async function renderClip(id) {
+async function renderClip(id, signal) {
   const clip = db.prepare('SELECT * FROM clips WHERE id=?').get(id);
   const fail = (msg) => db.prepare("UPDATE clips SET status='failed', error=? WHERE id=?").run(msg, id);
   // Short sa titlovima nastaje iz već izrezanog Shorta, a običan iz snimka.
@@ -135,15 +144,19 @@ async function renderClip(id) {
   try {
     const length = clip.end_s - clip.start_s;
     const onProgress = progressSetter('clips', id);
-    if (clip.subtitles) await media.renderCaptioned({ input: source.path, output: clip.path, subtitles: clip.subtitles, duration: length }, onProgress);
-    else await media.renderShort({ input: source.path, output: clip.path, start: clip.start_s, duration: length, layout: clip.layout }, onProgress);
+    if (clip.subtitles) await media.renderCaptioned({ input: source.path, output: clip.path, subtitles: clip.subtitles, duration: length }, onProgress, signal);
+    else {
+      const overlay = clip.label ? media.buildLabelAss(JSON.parse(clip.label), media.SHORT_SIZE) : null;
+      await media.renderShort({ input: source.path, output: clip.path, start: clip.start_s, duration: length, layout: clip.layout, overlay }, onProgress, signal);
+    }
     await media.thumbnail(clip.path, thumbPath('clip', id), Math.min(1, length / 2), 360).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
     db.prepare("UPDATE clips SET status='ready', progress=100, size=? WHERE id=?").run(fs.statSync(clip.path).size, id);
     console.log(`[studio] ✔ Short "${clip.title}"`);
     advanceClip(id);
   } catch (err) {
+    removeFile(clip.path);
+    if (signal.aborted) return; // prekinuo ga je korisnik; red je već obrisan
     console.warn(`[studio] ✘ Short "${clip.title}": ${err.message}`);
-    fs.rm(clip.path, { force: true }, () => {});
     fail(err.message);
   }
 }
@@ -246,7 +259,7 @@ function requestCaptions(clipId) {
   tick();
 }
 
-async function transcribeClip(id) {
+async function transcribeClip(id, signal) {
   const cap = db.prepare('SELECT * FROM captions WHERE id=?').get(id);
   const clip = db.prepare('SELECT * FROM clips WHERE id=?').get(cap.clip_id);
   const fail = (msg) => db.prepare("UPDATE captions SET status='failed', error=? WHERE id=?").run(msg, id);
@@ -255,7 +268,7 @@ async function transcribeClip(id) {
   if (problem) return fail(problem);
   db.prepare("UPDATE captions SET status='transcribing', progress=0, error=NULL WHERE id=?").run(id);
   try {
-    const lines = await media.transcribe(clip.path, clip.end_s - clip.start_s, progressSetter('captions', id));
+    const lines = await media.transcribe(clip.path, clip.end_s - clip.start_s, progressSetter('captions', id), signal);
     db.prepare("UPDATE captions SET status='ready', progress=100, lines=? WHERE id=?").run(JSON.stringify(lines), id);
     console.log(`[studio] ✔ captions for "${clip.title}" (${lines.length} lines)`);
     const next = readFollowup(clip);
@@ -268,6 +281,7 @@ async function transcribeClip(id) {
       } else finishChain(clip, next);
     }
   } catch (err) {
+    if (signal.aborted) return; // prekinuo ih je korisnik zajedno sa lancem
     console.warn(`[studio] ✘ captions for "${clip.title}": ${err.message}`);
     fail(err.message);
     // Lanac se ne prekida zbog titlova: intro i outro se dodaju i bez njih.
@@ -313,6 +327,11 @@ function advanceClip(clipId) {
   const clip = db.prepare('SELECT * FROM clips WHERE id=?').get(clipId);
   const next = readFollowup(clip);
   if (!next) return;
+  // Kod dijeljenja snimka: kad je Short sa titlovima gotov, međukorak bez titlova više ne treba.
+  if (next.cleanup && clip.subtitles) {
+    const source = db.prepare('SELECT * FROM clips WHERE id=?').get(clip.source_clip_id);
+    if (source) deleteClip(source);
+  }
   if (next.captions && !clip.subtitles && !media.transcribeProblem()) return requestCaptions(clip.id);
   finishChain(clip, next);
 }
@@ -331,4 +350,86 @@ function finishChain(clip, next) {
   });
 }
 
-module.exports = { MIN_CLIP, MAX_CLIP, thumbPath, scan, createClip, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, start, tick };
+// ── Dijeljenje cijelog snimka na Shorts ───────────────────
+const MIN_PART = 5; // najkraća dužina dijela koju korisnik može zadati
+
+/**
+ * Dijeli snimak na uzastopne dijelove zadane dužine. Kratak ostatak na kraju se
+ * pripaja posljednjem dijelu (ako time ne pređe najveću dužinu Shorta), a duži
+ * ostatak postaje zaseban, kraći dio.
+ */
+function splitRanges(duration, length) {
+  const full = Math.floor(duration / length);
+  if (full === 0) return duration >= MIN_CLIP ? [{ start: 0, end: duration }] : [];
+  const ranges = Array.from({ length: full }, (_, i) => ({ start: i * length, end: (i + 1) * length }));
+  const rest = duration - full * length;
+  if (rest >= Math.max(MIN_CLIP, length * 0.25)) ranges.push({ start: full * length, end: duration });
+  else if (rest > 0 && length + rest <= MAX_CLIP) ranges[full - 1].end = duration;
+  return ranges;
+}
+
+/**
+ * Reže cijeli snimak na Shorts. `label` (npr. { word: 'PART', position: 'top' }) upisuje
+ * redni broj dijela u sliku; `followup` je lanac koji slijedi za svaki dio.
+ */
+function splitRecording(rec, { length, layout, prefix, label = null, followup = null }) {
+  const ranges = splitRanges(rec.duration, length);
+  const insert = db.prepare(
+    'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, label, followup, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  );
+  db.transaction(() => {
+    ranges.forEach((range, i) => {
+      const title = `${prefix} - Part ${i + 1}`.slice(0, 100);
+      insert.run(
+        rec.user_id,
+        rec.id,
+        rec.name,
+        title,
+        range.start,
+        range.end,
+        layout,
+        path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`),
+        label ? JSON.stringify({ text: `${label.word} ${i + 1}`, position: label.position }) : null,
+        // Međukorak bez titlova se briše kad Short sa titlovima bude gotov, da ne ostanu dupli.
+        followup ? JSON.stringify({ ...followup, title, cleanup: true }) : null,
+        db.now()
+      );
+    });
+  });
+  tick();
+  return ranges.length;
+}
+
+/** Briše Short sa diska i iz baze, zajedno sa njegovom sličicom i paketom za objavu. */
+function deleteClip(clip) {
+  removeFile(clip.path);
+  fs.rm(thumbPath('clip', clip.id), { force: true }, () => {});
+  db.prepare("DELETE FROM kits WHERE user_id=? AND kind='clip' AND item_id=?").run(clip.user_id, clip.id);
+  db.prepare('DELETE FROM clips WHERE id=?').run(clip.id);
+}
+
+/** Briše fajl i kad ga ffmpeg još nakratko drži otvorenim (Windows). */
+const removeFile = (file) => fs.rm(file, { force: true, maxRetries: 10, retryDelay: 200 }, () => {});
+
+/** Prekida Short koji se upravo pravi ili čeka na red, i uklanja ga. */
+function cancelClip(clip) {
+  if (current && current.kind === 'clip' && current.id === clip.id) current.controller.abort();
+  deleteClip(clip);
+}
+
+/**
+ * Prekida sve Shortse koji još nisu gotovi i zaustavlja lance (titlove, intro i outro
+ * koji su trebali uslijediti). Gotovi Shorts ostaju. Vraća koliko ih je uklonjeno.
+ */
+function cancelShorts(userId) {
+  const unfinished = db.prepare("SELECT * FROM clips WHERE user_id=? AND status IN ('pending', 'rendering')").all(userId);
+  const chained = 'SELECT id FROM clips WHERE user_id=? AND followup IS NOT NULL';
+  const running = current && current.kind === 'captions' ? db.prepare(`SELECT 1 FROM captions WHERE id=? AND clip_id IN (${chained})`).get(current.id, userId) : null;
+  db.prepare(`DELETE FROM captions WHERE status IN ('pending', 'transcribing') AND clip_id IN (${chained})`).run(userId);
+  db.prepare('UPDATE clips SET followup=NULL WHERE user_id=?').run(userId);
+  if (current && (current.kind === 'clip' || running)) current.controller.abort();
+  for (const clip of unfinished) deleteClip(clip);
+  return unfinished.length;
+}
+
+module.exports = { MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, cancelClip, cancelShorts, start, tick };

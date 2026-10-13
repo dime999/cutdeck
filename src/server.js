@@ -359,6 +359,25 @@ route(
   }
 );
 
+// Prekida jedan Short koji čeka ili se upravo pravi.
+route('POST', '/clips/:id/cancel', (ctx) => {
+  const clip = userClip(ctx);
+  const back = clip && ctx.query.get('from') === 'recording' && clip.recording_id ? `/recordings/${clip.recording_id}` : '/shorts';
+  if (clip && clip.status !== 'ready') {
+    studio.cancelClip(clip);
+    flash(ctx, 'ok', `“${clip.title}” was cancelled.`);
+  }
+  redirect(ctx, back);
+});
+
+// Prekida sve Shortse koji još nisu gotovi, zajedno sa titlovima, introm i outrom koji su trebali uslijediti.
+route('POST', '/shorts/cancel', (ctx) => {
+  const removed = studio.cancelShorts(ctx.user.id);
+  flash(ctx, 'ok', removed ? `Stopped. ${removed} unfinished ${removed === 1 ? 'Short was' : 'Shorts were'} removed; the finished ones are kept.` : 'Stopped. Nothing was waiting.');
+  const rec = Number(ctx.query.get('recording'));
+  redirect(ctx, rec ? `/recordings/${rec}` : '/shorts');
+});
+
 route(
   'POST',
   '/clips/:id/delete',
@@ -388,8 +407,10 @@ route(
     const recs = recId
       ? db.prepare('SELECT id, status, progress FROM recordings WHERE id=? AND user_id=? AND hidden=0').all(recId, ctx.user.id)
       : db.prepare('SELECT id, status, progress FROM recordings WHERE user_id=? AND hidden=0').all(ctx.user.id);
-    const clips = db.prepare('SELECT id, status, progress FROM clips WHERE user_id=?').all(ctx.user.id);
-    const videos = db.prepare('SELECT id, status, progress FROM exports WHERE user_id=?').all(ctx.user.id);
+    const clips = recId
+      ? db.prepare('SELECT id, status, progress FROM clips WHERE user_id=? AND recording_id=?').all(ctx.user.id, recId)
+      : db.prepare('SELECT id, status, progress FROM clips WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
+    const videos = db.prepare('SELECT id, status, progress FROM exports WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
     const captions = db
       .prepare('SELECT c.clip_id, c.status, c.progress FROM captions c JOIN clips ON clips.id = c.clip_id WHERE clips.user_id=?')
       .all(ctx.user.id);
@@ -403,6 +424,55 @@ route(
     });
   }
 );
+
+// ── Rute: dijeljenje cijelog snimka na Shorts ─────────────
+const MAX_SPLIT_PARTS = 300;
+
+route('GET', '/recordings/:id/split', (ctx) => {
+  const rec = userRecording(ctx);
+  if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
+  if (rec.status !== 'ready') {
+    flash(ctx, 'bad', 'Wait for the analysis of this recording to finish.');
+    return redirect(ctx, `/recordings/${rec.id}`);
+  }
+  const bumpers = db.prepare('SELECT id, name, duration FROM bumpers WHERE user_id=? ORDER BY name COLLATE NOCASE').all(ctx.user.id);
+  html(ctx, views.splitPage(ctx, { rec, bumpers, captionsProblem: media.transcribeProblem(), ffmpegOk: media.isAvailable() }));
+});
+
+route('POST', '/recordings/:id/split', async (ctx) => {
+  const rec = userRecording(ctx);
+  if (!rec) return redirect(ctx, '/recordings');
+  const form = await readForm(ctx.req);
+  const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, `/recordings/${rec.id}/split`));
+
+  const length = Number(form.get('length'));
+  const layout = form.get('layout');
+  if (!media.isAvailable()) return fail('ffmpeg is not installed, so Shorts cannot be created yet.');
+  if (rec.status !== 'ready') return fail('Wait for the analysis of this recording to finish.');
+  if (!(length >= studio.MIN_PART) || length > studio.MAX_CLIP) return fail(`A part must be between ${studio.MIN_PART} and ${studio.MAX_CLIP} seconds long.`);
+  if (!media.LAYOUTS.some(([id]) => id === layout)) return fail('Choose a layout.');
+  const count = studio.splitRanges(rec.duration, length).length;
+  if (!count) return fail('This recording is too short to split.');
+  if (count > MAX_SPLIT_PARTS) return fail(`That would make ${count} Shorts. Choose longer parts, so there are at most ${MAX_SPLIT_PARTS}.`);
+
+  const prefix = (form.get('prefix') || '').replace(/\s+/g, ' ').trim().slice(0, 80) || path.parse(rec.name).name.slice(0, 80);
+  // Riječ ispred broja, npr. PART; prazna kvačica znači bez natpisa.
+  const word = (form.get('label_word') || '').replace(/[{}\\]/g, '').replace(/\s+/g, ' ').trim().slice(0, 20) || 'PART';
+  const label = form.get('label') === '1' ? { word, position: form.get('label_position') === 'bottom' ? 'bottom' : 'top' } : null;
+
+  const bumperId = (field) => {
+    const b = form.get(field) ? db.prepare('SELECT id FROM bumpers WHERE id=? AND user_id=?').get(Number(form.get(field)), ctx.user.id) : null;
+    return b ? b.id : null;
+  };
+  const captions = form.get('auto_captions') === '1' && !media.transcribeProblem();
+  const intro = bumperId('auto_intro');
+  const outro = bumperId('auto_outro');
+  const followup = captions || intro || outro ? { captions, style: getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE), intro, outro } : null;
+
+  studio.splitRecording(rec, { length, layout, prefix, label, followup });
+  flash(ctx, 'ok', `${count} ${count === 1 ? 'Short is' : 'Shorts are'} being created from “${rec.name}”. This page updates as they finish.`);
+  redirect(ctx, '/shorts');
+});
 
 // ── Rute: titlovi za Shorts ───────────────────────────────
 const MAX_CAPTION_LINES = 600;

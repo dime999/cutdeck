@@ -208,6 +208,10 @@ p.error { padding: 0.6rem 0.8rem; border-radius: var(--r-control); background: c
 .moments { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0; padding: 0; list-style: none; }
 .moment { padding: 0.3rem 0.65rem; font-variant-numeric: tabular-nums; }
 
+.queue-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 1rem; padding: 0.55rem 0.6rem 0.55rem 0.9rem; border-left: 3px solid var(--sky); border-radius: var(--r-control); background: color-mix(in srgb, var(--sky) 8%, var(--panel)); }
+.queue-bar form { margin: 0; }
+.queue-bar button { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+
 /* ── Pločice: Shorts (9:16), thumbnailovi i videi (16:9) ── */
 .shorts { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 1.6rem 1rem; margin: 0; padding: 0; list-style: none; }
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.6rem 1rem; margin: 0; padding: 0; list-style: none; }
