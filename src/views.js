@@ -664,7 +664,9 @@ function videosPage(ctx, { videos, ffmpegOk }) {
       return `<li class="thumb" data-poll-key="video:${v.id}" data-state="${h(v.status)}">
       ${frame}
       <strong class="short-title">${h(v.title)}</strong>
-      ${meta(v.published ? PUBLISHED : '', parts, v.size ? fmtSize(v.size) : '', v.width ? `${v.width}×${v.height}` : '')}
+      <p class="tile-desc">${parts}</p>
+      <button type="button" class="link tile-more" aria-expanded="false" hidden>Show all</button>
+      ${meta(v.published ? PUBLISHED : '', v.size ? fmtSize(v.size) : '', v.width ? `${v.width}×${v.height}` : '')}
       <div class="short-actions">
         ${actions}
       </div>

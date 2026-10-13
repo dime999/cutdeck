@@ -961,6 +961,31 @@ if (sideActivity) {
   setInterval(refreshActivity, 4000);
 }
 
+// ── Opis pločice: „Show all“ samo ako je tekst zaista odsječen ──
+function markLongDescriptions() {
+  for (const desc of document.querySelectorAll('.tile-desc')) {
+    const more = desc.nextElementSibling;
+    if (!more || !more.classList.contains('tile-more')) continue;
+    if (desc.classList.contains('is-open')) continue;
+    // Poredi visinu sa dva reda i visinu cijelog teksta; scrollHeight ovdje nije pouzdan.
+    const clamped = desc.getBoundingClientRect().height;
+    desc.classList.add('is-open');
+    const full = desc.getBoundingClientRect().height;
+    desc.classList.remove('is-open');
+    more.hidden = full <= clamped + 1;
+  }
+}
+document.addEventListener('click', (e) => {
+  const more = e.target.closest('.tile-more');
+  if (!more) return;
+  const open = more.previousElementSibling.classList.toggle('is-open');
+  more.textContent = open ? 'Show less' : 'Show all';
+  more.setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('live:refresh', markLongDescriptions);
+window.addEventListener('resize', markLongDescriptions);
+markLongDescriptions();
+
 // Pregled Shorta dok je miš iznad njega
 document.addEventListener(
   'mouseenter',

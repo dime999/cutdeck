@@ -337,7 +337,12 @@ a.short-frame:hover, a.thumb-frame:hover, a.short-frame:focus-visible, a.thumb-f
 .short-frame p, .thumb-frame p { margin: 0; }
 .short-frame .progress, .thumb-frame .progress { width: 124px; margin: 0; }
 .short-title { margin-top: 0.7rem; font: 600 1.04rem/1.25 var(--display); font-stretch: 87.5%; overflow-wrap: anywhere; }
-.short-actions { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.7rem; }
+/* Opis pločice: najviše dva reda, a cijeli se otvara dugmetom ispod. */
+.tile-desc { display: -webkit-box; margin: 0.3rem 0 0; overflow: hidden; color: var(--muted); font-size: 0.84rem; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.tile-desc.is-open { display: block; }
+.tile-more { align-self: flex-start; margin-top: 0.15rem; font-size: 0.82rem; }
+/* Akcije su uvijek na dnu pločice, pa su u jednom redu poravnate bez obzira na dužinu teksta iznad. */
+.short-actions { display: flex; align-items: center; gap: 0.4rem; margin-top: auto; padding-top: 0.7rem; }
 .short-actions form { margin: 0; }
 .short-actions button, .short-actions .button { height: 32px; padding: 0 0.7rem; font-size: 0.86rem; }
 .short-actions .icon-only { width: 32px; padding: 0; }
