@@ -123,7 +123,7 @@ async function analyze(id) {
     const at = moments.length ? moments[0].start + 15 : info.duration * 0.1;
     await media.thumbnail(rec.path, thumbPath('rec', id), at, 480).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
     db.transaction(() => {
-      db.prepare('UPDATE recordings SET waveform=? WHERE id=?').run(JSON.stringify(media.waveform(levels)), id);
+      db.prepare('UPDATE recordings SET waveform=?, levels=? WHERE id=?').run(JSON.stringify(media.waveform(levels)), JSON.stringify(levels.map((l) => Math.round(l * 10) / 10)), id);
       db.prepare('DELETE FROM moments WHERE recording_id=?').run(id);
       const insert = db.prepare('INSERT INTO moments (recording_id, start_s, end_s, score) VALUES (?, ?, ?, ?)');
       for (const m of moments) insert.run(id, m.start, m.end, m.score);
@@ -478,16 +478,38 @@ async function transcribeRecording(id, signal) {
 }
 
 /** Klip kampanje: složen iz dijelova izvora (edl), sa titlovima koji se upisuju u istom prolazu. */
-function createCampaignClip(rec, { campaignId, title, start, end, layout, edl, length, subtitles }) {
+function createCampaignClip(rec, { campaignId, title, start, end, layout, edl, length, subtitles, lines = null }) {
   const file = path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`);
   const r = db
     .prepare(
-      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, campaign_id, edl, length_s, subtitles, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, campaign_id, edl, length_s, subtitles, cap_lines, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, campaignId, JSON.stringify(edl), length, subtitles, db.now());
+    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, campaignId, JSON.stringify(edl), length, subtitles, lines ? JSON.stringify(lines) : null, db.now());
   tick();
   return Number(r.lastInsertRowid);
 }
 
-module.exports = { MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, requestTranscript, createCampaignClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };
+/** Izmijenjen klip kampanje se pravi iznova, u isti fajl; objave i opis ostaju. */
+function rerenderCampaignClip(id, { start, end, layout, edl, length, subtitles, lines }) {
+  db.prepare("UPDATE clips SET start_s=?, end_s=?, layout=?, edl=?, length_s=?, subtitles=?, cap_lines=?, status='pending', progress=0, error=NULL WHERE id=?").run(
+    start, end, layout, JSON.stringify(edl), length, subtitles, lines ? JSON.stringify(lines) : null, id
+  );
+  tick();
+}
+
+/** Glasnoća snimka po sekundama. Snimci analizirani prije nego što se čuvala dobiju je pri prvom traženju. */
+async function recordingLevels(rec) {
+  if (rec.levels) return JSON.parse(rec.levels);
+  if (!fs.existsSync(rec.path)) return [];
+  try {
+    const levels = (await media.audioLevels(rec.path, rec.duration, () => {})).map((l) => Math.round(l * 10) / 10);
+    db.prepare('UPDATE recordings SET levels=? WHERE id=?').run(JSON.stringify(levels), rec.id);
+    return levels;
+  } catch (err) {
+    console.warn(`[studio] loudness of "${rec.name}": ${err.message}`);
+    return []; // bez glasnoće i dalje radi sve osim automatskog hooka
+  }
+}
+
+module.exports = { rerenderCampaignClip, recordingLevels, MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, requestTranscript, createCampaignClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };

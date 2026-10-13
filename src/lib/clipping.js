@@ -136,6 +136,42 @@ function suggestScenes({ words, waveform = [], duration, count, target, min = 0,
   return picked.sort((a, b) => a.start - b.start);
 }
 
+/**
+ * Hook za scenu: do tri sekunde govora koje su glasnije od ostatka scene, da se puste prve.
+ * `levels` je glasnoća cijelog snimka u decibelima, po jedna vrijednost za svaku sekundu.
+ * Prve tri sekunde scene se ne uzimaju (klip ionako počinje njima). Vraća { start, end } ili null.
+ */
+function pickHook({ start, end, words, levels = [] }) {
+  if (!levels.length) return null;
+  const level = (from, to) => {
+    // Prosjek po sekundama, svaka s težinom dijela koji upada u raspon.
+    let sum = 0;
+    let span = 0;
+    for (let s = Math.floor(from); s < to && s < levels.length; s++) {
+      const part = Math.min(to, s + 1) - Math.max(from, s);
+      sum += levels[s] * part;
+      span += part;
+    }
+    return span ? sum / span : -100;
+  };
+  const inside = words.filter((w) => w.s >= start && w.e <= end);
+  let best = null;
+  for (const [i, first] of inside.entries()) {
+    if (first.s < start + 3) continue;
+    let last = first;
+    for (let j = i; j < inside.length && inside[j].s < first.s + 2 && inside[j].e <= first.s + 3; j++) last = inside[j];
+    const from = Math.max(start, first.s - 0.1);
+    const to = Math.min(end, last.e + 0.15);
+    if (to - from < 1) continue;
+    const score = level(from, to);
+    if (!best || score > best.score) best = { start: round2(from), end: round2(to), score };
+  }
+  return best && best.score > level(start, end) + 1 ? { start: best.start, end: best.end } : null;
+}
+
+/** Šta se kaže između dva vremena izvora. */
+const saidBetween = (words, start, end) => words.filter((w) => (w.s + w.e) / 2 >= start && (w.s + w.e) / 2 < end).map((w) => w.t).join(' ');
+
 /** Tekst titlova bez ASS oznaka, za provjeru zabranjenih riječi. */
 const subtitleText = (ass) =>
   String(ass || '')
@@ -193,4 +229,4 @@ function platformCaption(campaign, clip, platform) {
   return [String(clip.caption || '').trim(), [...tags, ...hashtags].join(' ')].filter(Boolean).join(' ');
 }
 
-module.exports = { PLATFORMS, withPrefix, bannedList, removePauses, buildEdl, edlLength, mapWords, overlapShare, sentences, suggestScenes, subtitleText, checkClip, platformCaption };
+module.exports = { PLATFORMS, withPrefix, bannedList, removePauses, buildEdl, edlLength, mapWords, overlapShare, sentences, suggestScenes, pickHook, saidBetween, subtitleText, checkClip, platformCaption };

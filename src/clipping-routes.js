@@ -101,7 +101,7 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
     if (!campaign) return notFound(ctx, 'campaign');
     const rec = db.prepare("SELECT * FROM recordings WHERE id=? AND user_id=? AND hidden=0 AND status='ready'").get(campaign.recording_id, ctx.user.id) || null;
     const transcript = rec ? db.prepare('SELECT * FROM transcripts WHERE recording_id=?').get(rec.id) || null : null;
-    const lines = transcript && transcript.status === 'ready' ? transcriptLines(JSON.parse(transcript.words)) : [];
+    const lines = transcript && transcript.status === 'ready' ? transcriptLines(media.cleanWords(JSON.parse(transcript.words), 't')) : [];
     const clips = campaignClips(campaign);
     const posted = db.prepare('SELECT COUNT(*) AS n FROM posts WHERE clip_id=? AND posted_at IS NOT NULL');
     for (const c of clips) {
@@ -158,105 +158,176 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
     redirect(ctx, `/clipping/${campaign.id}`);
   });
 
+  const campaignRecording = (campaign) =>
+    db.prepare("SELECT * FROM recordings WHERE id=? AND user_id=? AND hidden=0 AND status='ready'").get(campaign.recording_id, campaign.user_id);
+  const transcriptWords = (rec) => {
+    const row = db.prepare("SELECT words FROM transcripts WHERE recording_id=? AND status='ready'").get(rec.id);
+    return row ? media.cleanWords(JSON.parse(row.words), 't') : null; // i transkripti nastali prije čišćenja
+  };
+
+  // Hook iz forme: { hook } (null ako su oba polja prazna) ili { error }.
+  function readHook(form, rec) {
+    if (!(form.get('hook_start') || '').trim() && !(form.get('hook_end') || '').trim()) return { hook: null };
+    const from = parseTime(form.get('hook_start'));
+    const to = parseTime(form.get('hook_end'));
+    if (Number.isNaN(from) || Number.isNaN(to)) return { error: 'Enter both ends of the hook as m:ss, or leave both empty.' };
+    if (to - from < 0.5 || to - from > MAX_HOOK) return { error: `A hook is between half a second and ${MAX_HOOK} seconds long.` };
+    if (to > rec.duration + 0.5) return { error: 'The hook is past the end of the episode.' };
+    return { hook: { start: from, end: Math.min(to, rec.duration) } };
+  }
+
+  // Scena iz forme: { start, end } ili { error }.
+  function readScene(form, rec) {
+    const start = parseTime(form.get('start'));
+    const end = parseTime(form.get('end'));
+    if (Number.isNaN(start) || Number.isNaN(end)) return { error: 'Enter the start and end as m:ss, for example 12:34.' };
+    if (end - start < studio.MIN_CLIP) return { error: `The scene must be at least ${studio.MIN_CLIP} seconds long.` };
+    if (end > rec.duration + 0.5) return { error: 'The end is past the end of the episode.' };
+    return { start, end: Math.min(end, rec.duration) };
+  }
+
+  /**
+   * Sve što klipu treba prije rezanja: dijelovi izvora, dužina i titlovi iz transkripta.
+   * Bez zadanog hooka, uz `autoHook`, hook se bira po glasnoći (`levels`).
+   */
+  function planClip({ words, levels = [], style, start, end, hook = null, autoHook = false, trimSilence }) {
+    if (!hook && autoHook) hook = clipping.pickHook({ start, end, words, levels });
+    const edl = clipping.buildEdl({ start, end, hook, trimSilence, words });
+    const lines = media.linesFromWords(clipping.mapWords(edl, words));
+    return { edl, hook, length: clipping.edlLength(edl), lines, subtitles: lines.length ? media.buildAss(lines, style, media.SHORT_SIZE) : null };
+  }
+  const lengthProblem = (campaign, length) =>
+    length > MAX_CLIP
+      ? `The clip would be ${Math.round(length)} seconds long; the longest allowed is ${MAX_CLIP}.`
+      : length < campaign.min_seconds
+        ? `The clip would be ${length.toFixed(1)} seconds long, shorter than the ${campaign.min_seconds} seconds this campaign asks for. Choose a longer scene.`
+        : null;
+
   route('POST', '/clipping/:id/clips', async (ctx) => {
     const campaign = userCampaign(ctx);
     if (!campaign) return redirect(ctx, '/clipping');
     const back = `/clipping/${campaign.id}`;
     const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, back));
     const form = await readForm(ctx.req);
-    const rec = db.prepare("SELECT * FROM recordings WHERE id=? AND user_id=? AND hidden=0 AND status='ready'").get(campaign.recording_id, ctx.user.id);
+    const rec = campaignRecording(campaign);
     if (!rec) return fail('The episode of this campaign is missing. Choose another one in the campaign rules.');
     if (!media.isAvailable()) return fail('ffmpeg is not installed, so clips cannot be created yet.');
 
-    const start = parseTime(form.get('start'));
-    const end = parseTime(form.get('end'));
+    const scene = readScene(form, rec);
+    if (scene.error) return fail(scene.error);
     const layout = form.get('layout');
-    if (Number.isNaN(start) || Number.isNaN(end)) return fail('Enter the start and end as m:ss, for example 12:34.');
-    if (end - start < studio.MIN_CLIP) return fail(`The scene must be at least ${studio.MIN_CLIP} seconds long.`);
-    if (end > rec.duration + 0.5) return fail('The end is past the end of the episode.');
     if (!media.LAYOUTS.some(([id]) => id === layout)) return fail('Choose a layout.');
+    const asked = readHook(form, rec);
+    if (asked.error) return fail(asked.error);
 
-    let hook = null;
-    if ((form.get('hook_start') || '').trim() || (form.get('hook_end') || '').trim()) {
-      const from = parseTime(form.get('hook_start'));
-      const to = parseTime(form.get('hook_end'));
-      if (Number.isNaN(from) || Number.isNaN(to)) return fail('Enter both ends of the hook as m:ss, or leave both empty.');
-      if (to - from < 0.5 || to - from > MAX_HOOK) return fail(`A hook is between half a second and ${MAX_HOOK} seconds long.`);
-      if (to > rec.duration + 0.5) return fail('The hook is past the end of the episode.');
-      hook = { start: from, end: Math.min(to, rec.duration) };
-    }
+    const words = transcriptWords(rec);
+    const autoHook = !asked.hook && form.get('auto_hook') === '1' && Boolean(words);
+    const plan = planClip({
+      words: words || [],
+      levels: autoHook ? await studio.recordingLevels(rec) : [],
+      style: getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE),
+      ...scene,
+      hook: asked.hook,
+      autoHook,
+      trimSilence: form.get('trim_silence') === '1',
+    });
+    const problem = lengthProblem(campaign, plan.length);
+    if (problem) return fail(problem);
 
-    const transcript = db.prepare("SELECT words FROM transcripts WHERE recording_id=? AND status='ready'").get(rec.id);
-    const words = transcript ? JSON.parse(transcript.words) : [];
-    const edl = clipping.buildEdl({ start, end: Math.min(end, rec.duration), hook, trimSilence: form.get('trim_silence') === '1', words });
-    const length = clipping.edlLength(edl);
-    if (length > MAX_CLIP) return fail(`The clip would be ${Math.round(length)} seconds long; the longest allowed is ${MAX_CLIP}.`);
-    if (length < campaign.min_seconds) return fail(`The clip would be ${length.toFixed(1)} seconds long, shorter than the ${campaign.min_seconds} seconds this campaign asks for. Choose a longer scene.`);
-
-    // Titlovi se prave iz transkripta, preslikanog na vrijeme gotovog klipa.
-    const lines = media.linesFromWords(clipping.mapWords(edl, words));
-    const style = getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE);
-    const subtitles = lines.length ? media.buildAss(lines, style, media.SHORT_SIZE) : null;
-    const title = (form.get('title') || '').replace(/\s+/g, ' ').trim().slice(0, 100) || `${campaign.name} ${views.fmtTime(start)}`.slice(0, 100);
-    const repeated = clipping.overlapShare(start, end, campaignClips(campaign).map((c) => ({ start: c.start_s, end: c.end_s })));
-
-    studio.createCampaignClip(rec, { campaignId: campaign.id, title, start, end: Math.min(end, rec.duration), layout, edl, length, subtitles });
+    const title = (form.get('title') || '').replace(/\s+/g, ' ').trim().slice(0, 100) || `${campaign.name} ${views.fmtTime(scene.start)}`.slice(0, 100);
+    const repeated = clipping.overlapShare(scene.start, scene.end, campaignClips(campaign).map((c) => ({ start: c.start_s, end: c.end_s })));
+    studio.createCampaignClip(rec, { campaignId: campaign.id, title, ...scene, layout, edl: plan.edl, length: plan.length, subtitles: plan.subtitles, lines: plan.lines });
     const notes = [
-      !transcript && 'The episode is not transcribed, so this clip has no captions.',
-      transcript && !lines.length && 'No speech was found in this part, so this clip has no captions.',
+      autoHook && (plan.hook ? `It opens with a hook from ${views.fmtTime(plan.hook.start)}.` : 'No part of this scene stands out enough to be a hook, so it has none.'),
+      !words && 'The episode is not transcribed, so this clip has no captions.',
+      words && !plan.lines.length && 'No speech was found in this part, so this clip has no captions.',
       repeated >= 0.5 && `${Math.round(repeated * 100)}% of this scene is already in another clip of this campaign.`,
     ].filter(Boolean);
-    flash(ctx, 'ok', [`Clip “${title}” is being created (${length.toFixed(1)} s).`, ...notes].join(' '));
+    flash(ctx, 'ok', [`Clip “${title}” is being created (${plan.length.toFixed(1)} s).`, ...notes].join(' '));
     redirect(ctx, back);
   });
 
-  // Prijedlozi: aplikacija sama izabere scene iz transkripta i od svake napravi gotov klip s titlovima.
+  // ── Prijedlozi: aplikacija izabere scene iz transkripta, korisnik ih pregleda, pa nastaju klipovi ──
+  // Vraća { rec, words } ili poruku zašto prijedloga ne može biti.
+  function suggestSource(campaign) {
+    const rec = campaignRecording(campaign);
+    if (!rec) return { error: 'The episode of this campaign is missing. Choose another one in the campaign rules.' };
+    const words = transcriptWords(rec);
+    if (!words) return { error: 'Transcribe the episode first. Suggestions are chosen from what is said.' };
+    return { rec, words };
+  }
+
+  route('GET', '/clipping/:id/suggest', async (ctx) => {
+    const campaign = userCampaign(ctx);
+    if (!campaign) return notFound(ctx, 'campaign');
+    const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, `/clipping/${campaign.id}`));
+    const { rec, words, error } = suggestSource(campaign);
+    if (error) return fail(error);
+    const count = Number(ctx.query.get('count'));
+    const target = Number(ctx.query.get('length'));
+    if (!SUGGEST_COUNTS.includes(count) || !SUGGEST_LENGTHS.includes(target)) return fail('Choose how many clips and how long.');
+
+    const levels = await studio.recordingLevels(rec);
+    const scenes = clipping
+      .suggestScenes({
+        words,
+        waveform: levels.length ? media.waveform(levels, levels.length) : [],
+        duration: rec.duration,
+        count,
+        target,
+        min: Math.max(campaign.min_seconds, studio.MIN_CLIP),
+        used: campaignClips(campaign).map((c) => ({ start: c.start_s, end: c.end_s })),
+      })
+      .map((scene) => {
+        const hook = clipping.pickHook({ start: scene.start, end: scene.end, words, levels });
+        return { ...scene, said: clipping.saidBetween(words, scene.start, scene.end), hook, hookSaid: hook ? clipping.saidBetween(words, hook.start, hook.end) : '' };
+      });
+    if (!scenes.length) return fail('No new scenes were found. The episode may have too little speech, or its best parts are already in your clips.');
+    html(ctx, pages.suggestPage(ctx, { campaign, rec, scenes, count, target, ffmpegOk: media.isAvailable() }));
+  });
+
   route('POST', '/clipping/:id/suggest', async (ctx) => {
     const campaign = userCampaign(ctx);
     if (!campaign) return redirect(ctx, '/clipping');
     const back = `/clipping/${campaign.id}`;
     const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, back));
     const form = await readForm(ctx.req);
-    const rec = db.prepare("SELECT * FROM recordings WHERE id=? AND user_id=? AND hidden=0 AND status='ready'").get(campaign.recording_id, ctx.user.id);
-    if (!rec) return fail('The episode of this campaign is missing. Choose another one in the campaign rules.');
+    const { rec, words, error } = suggestSource(campaign);
+    if (error) return fail(error);
     if (!media.isAvailable()) return fail('ffmpeg is not installed, so clips cannot be created yet.');
-    const transcript = db.prepare("SELECT words FROM transcripts WHERE recording_id=? AND status='ready'").get(rec.id);
-    if (!transcript) return fail('Transcribe the episode first. Suggestions are chosen from what is said.');
-
-    const count = Number(form.get('count'));
-    const target = Number(form.get('length'));
     const layout = form.get('layout');
-    if (!SUGGEST_COUNTS.includes(count) || !SUGGEST_LENGTHS.includes(target)) return fail('Choose how many clips and how long.');
     if (!media.LAYOUTS.some(([id]) => id === layout)) return fail('Choose a layout.');
 
-    const words = JSON.parse(transcript.words);
-    const scenes = clipping.suggestScenes({
-      words,
-      waveform: rec.waveform ? JSON.parse(rec.waveform) : [],
-      duration: rec.duration,
-      count,
-      target,
-      min: Math.max(campaign.min_seconds, studio.MIN_CLIP),
-      used: campaignClips(campaign).map((c) => ({ start: c.start_s, end: c.end_s })),
-    });
+    // Izabrane scene stižu kao "početak-kraj" u sekundama izvora.
+    const scenes = [];
+    for (const value of form.getAll('scene').slice(0, Math.max(...SUGGEST_COUNTS))) {
+      const m = /^(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)$/.exec(value);
+      if (!m) continue;
+      const [start, end] = [Number(m[1]), Number(m[2])];
+      if (end - start >= studio.MIN_CLIP && end <= rec.duration + 0.5 && !scenes.some((s) => start < s.end && end > s.start)) scenes.push({ start, end });
+    }
+    if (!scenes.length) return fail('No scene was selected, so no clips were created.');
+
+    const autoHook = form.get('auto_hook') === '1';
+    const levels = autoHook ? await studio.recordingLevels(rec) : [];
     const style = getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE);
     let made = 0;
+    let hooks = 0;
     for (const scene of scenes) {
-      const edl = clipping.buildEdl({ start: scene.start, end: scene.end, trimSilence: form.get('trim_silence') === '1', words });
-      const length = clipping.edlLength(edl);
-      if (length < campaign.min_seconds || length > MAX_CLIP) continue;
-      const lines = media.linesFromWords(clipping.mapWords(edl, words));
+      const plan = planClip({ words, levels, style, ...scene, autoHook, trimSilence: form.get('trim_silence') === '1' });
+      if (lengthProblem(campaign, plan.length)) continue;
       // Naslov je početak onoga što se u sceni kaže; korisnik ga mijenja na stranici klipa.
-      const said = scene.text.replace(/[\s.,!?…]+$/, '');
-      const title = (said.length > 60 ? `${said.slice(0, 57).replace(/\s+\S*$/, '')}…` : said) || `${campaign.name} ${views.fmtTime(scene.start)}`.slice(0, 100);
-      studio.createCampaignClip(rec, { campaignId: campaign.id, title, start: scene.start, end: scene.end, layout, edl, length, subtitles: lines.length ? media.buildAss(lines, style, media.SHORT_SIZE) : null });
+      const said = clipping.saidBetween(words, scene.start, scene.end).replace(/["“”]/g, '');
+      const title = (said.length > 60 ? `${said.slice(0, 57).replace(/\s+\S*$/, '')}…` : said.replace(/[\s.,!?…]+$/, '')) || `${campaign.name} ${views.fmtTime(scene.start)}`.slice(0, 100);
+      studio.createCampaignClip(rec, { campaignId: campaign.id, title, ...scene, layout, edl: plan.edl, length: plan.length, subtitles: plan.subtitles, lines: plan.lines });
       made++;
+      if (plan.hook) hooks++;
     }
-    if (!made) return fail('No new scenes were found. The episode may have too little speech, or its best parts are already in your clips.');
+    if (!made) return fail('None of the selected scenes is long enough for this campaign once the pauses are cut out.');
     flash(
       ctx,
       'ok',
-      `${made} ${made === 1 ? 'clip is' : 'clips are'} being created${made < count ? ` (only ${made} ${made === 1 ? 'scene' : 'scenes'} of this length did not overlap)` : ''}. Watch each one before posting: the choice is based on loudness and how much is said, not on what is funny.`
+      `${made} ${made === 1 ? 'clip is' : 'clips are'} being created${autoHook ? `, ${hooks} of them with a hook` : ''}. Watch each one before posting.`
     );
     redirect(ctx, back);
   });
@@ -271,17 +342,20 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
     redirect(ctx, `/clipping/${campaign.id}`);
   });
 
-  // ── Jedan klip: provjera pravila, tekst za objavu i evidencija objava ──
+  // ── Jedan klip: provjera pravila, tekst za objavu, evidencija objava i izmjena ──
   const campaignClip = (ctx) => {
     const clip = db.prepare('SELECT * FROM clips WHERE id=? AND user_id=? AND campaign_id IS NOT NULL').get(Number(ctx.params.id), ctx.user.id);
     return clip ? { clip, campaign: userCampaign(ctx, clip.campaign_id) } : {};
   };
+  // Redovi titlova klipa; klipovi nastali prije nego što su se čuvali dobiju ih iz transkripta.
+  const clipLines = (clip, words) => (clip.cap_lines ? JSON.parse(clip.cap_lines) : words ? media.linesFromWords(clipping.mapWords(JSON.parse(clip.edl), words)) : []);
 
   route('GET', '/clipping/clips/:id', (ctx) => {
     const { clip, campaign } = campaignClip(ctx);
     if (!clip || !campaign || clip.status !== 'ready') return notFound(ctx, 'clip');
     const posts = db.prepare('SELECT * FROM posts WHERE clip_id=?').all(clip.id);
-    html(ctx, pages.clipPage(ctx, { campaign, clip, posts }));
+    const rec = campaignRecording({ ...campaign, recording_id: clip.recording_id });
+    html(ctx, pages.clipPage(ctx, { campaign, clip, posts, lines: clipLines(clip, rec && transcriptWords(rec)), canEdit: Boolean(rec) && media.isAvailable() }));
   });
 
   route('POST', '/clipping/clips/:id', async (ctx) => {
@@ -305,6 +379,48 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
     }
     flash(ctx, 'ok', 'Saved. The texts below now use the new caption.');
     redirect(ctx, `/clipping/clips/${clip.id}`);
+  });
+
+  // Izmjena gotovog klipa: novi rez, hook, raspored ili ispravljeni titlovi; klip se pravi iznova.
+  route('POST', '/clipping/clips/:id/edit', async (ctx) => {
+    const { clip, campaign } = campaignClip(ctx);
+    if (!clip || !campaign) return redirect(ctx, '/clipping');
+    const back = `/clipping/clips/${clip.id}`;
+    const fail = (msg) => (flash(ctx, 'bad', msg), redirect(ctx, back));
+    if (clip.status !== 'ready') return redirect(ctx, `/clipping/${campaign.id}`);
+    const form = await readForm(ctx.req);
+    const rec = campaignRecording({ ...campaign, recording_id: clip.recording_id });
+    if (!rec) return fail('The episode this clip was cut from is no longer in your recordings.');
+    if (!media.isAvailable()) return fail('ffmpeg is not installed, so the clip cannot be created again.');
+
+    const scene = readScene(form, rec);
+    if (scene.error) return fail(scene.error);
+    const layout = form.get('layout');
+    if (!media.LAYOUTS.some(([id]) => id === layout)) return fail('Choose a layout.');
+    const asked = readHook(form, rec);
+    if (asked.error) return fail(asked.error);
+
+    const words = transcriptWords(rec) || [];
+    const style = getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE);
+    const plan = planClip({ words, style, ...scene, hook: asked.hook, trimSilence: form.get('trim_silence') === '1' });
+    const problem = lengthProblem(campaign, plan.length);
+    if (problem) return fail(problem);
+
+    // Isti rez: vrijede ispravke teksta iz forme. Drugačiji rez: titlovi se slažu iznova iz transkripta.
+    const sameCut = JSON.stringify(plan.edl) === clip.edl;
+    let { lines, subtitles } = plan;
+    if (sameCut) {
+      const old = clipLines(clip, words);
+      lines = media.tidyLines(old.map((line, i) => ({ ...line, text: (form.get(`line_${i}`) ?? line.text).slice(0, 200) })));
+      subtitles = lines.length ? media.buildAss(lines, style, media.SHORT_SIZE) : null;
+      if (layout === clip.layout && JSON.stringify(lines.map((l) => l.text)) === JSON.stringify(old.map((l) => l.text))) {
+        flash(ctx, 'ok', 'Nothing was changed, so the clip stays as it is.');
+        return redirect(ctx, back);
+      }
+    }
+    studio.rerenderCampaignClip(clip.id, { ...scene, layout, edl: plan.edl, length: plan.length, subtitles, lines });
+    flash(ctx, 'ok', `Clip “${clip.title}” is being created again (${plan.length.toFixed(1)} s).${sameCut ? '' : ' The cut changed, so its captions were taken from the transcript again.'}`);
+    redirect(ctx, `/clipping/${campaign.id}`);
   });
 
   route('POST', '/clipping/clips/:id/delete', (ctx) => {

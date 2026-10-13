@@ -12,6 +12,14 @@ const fmtExact = (t) => {
   return whole >= 3600 ? `${Math.floor(whole / 3600)}:${String(min).padStart(2, '0')}:${sec}` : `${min}:${sec}`;
 };
 
+// Vrijeme sa stotinkom: forma za izmjenu klipa mora vratiti tačno isti rez da bi se prepoznalo da nije mijenjan.
+const fmtFine = (t) => {
+  const cs = Math.round(t * 100);
+  const sec = ((cs % 6000) / 100).toFixed(2).padStart(5, '0');
+  const min = Math.floor(cs / 6000) % 60;
+  return cs >= 360000 ? `${Math.floor(cs / 360000)}:${String(min).padStart(2, '0')}:${sec}` : `${min}:${sec}`;
+};
+
 // Polja pravila kampanje; koristi ih i forma za novu kampanju i forma za izmjenu.
 function campaignFields(c, recordings) {
   const value = (key) => h(c[key] ?? '');
@@ -137,12 +145,14 @@ function campaignPage(ctx, { campaign, rec, transcript, lines, clips, recordings
       <p class="muted small" id="cl-summary" aria-live="polite"></p>
 
       <h2>Hook</h2>
-      <p class="muted small">The strongest second or two of the scene, played first. Leave both fields empty for no hook.</p>
+      <p class="muted small">The strongest second or two of the scene, played first. Leave both fields empty and the app picks the loudest line, or switch that off for no hook.</p>
       <div class="cap-style cl-hook">
         <label>From<input name="hook_start" id="cl-hook-start" placeholder="12:47" autocomplete="off"></label>
         <label>To<input name="hook_end" id="cl-hook-end" placeholder="12:49" autocomplete="off"></label>
         <button type="button" data-cl-hook>2 s from player</button>
       </div>
+
+      <label class="check"><input type="checkbox" name="auto_hook" value="1" data-remember="clip-autohook" checked> Pick the hook for me when the fields are empty</label>
 
       <h2>Edit</h2>
       <label class="check"><input type="checkbox" name="trim_silence" value="1" data-remember="clip-trim" checked> Cut out pauses in the talking</label>
@@ -209,19 +219,15 @@ ${
   rec
     ? `<section class="card cl-suggest">
   <h2>Suggest clips</h2>
-  <p class="muted small">The app picks the loudest, most talkative scenes of the episode, cuts each on sentence ends and creates the clips with captions. Scenes already in your clips are skipped. Transcribe the episode first.</p>
-  <form method="post" action="/clipping/${campaign.id}/suggest" class="cl-suggest-form">
+  <p class="muted small">The app picks the loudest, most talkative scenes of the episode and cuts each on sentence ends. You look through them and choose which become clips. Scenes already in your clips are skipped. Transcribe the episode first.</p>
+  <form method="get" action="/clipping/${campaign.id}/suggest" class="cl-suggest-form">
     <label>How many
       <select name="count" data-remember="suggest-count">${[5, 10, 15, 20].map((n) => `<option value="${n}"${n === 10 ? ' selected' : ''}>${n} clips</option>`).join('')}</select>
     </label>
     <label>Length of each
       <select name="length" data-remember="suggest-length">${[15, 30, 45].map((n) => `<option value="${n}"${n === 30 ? ' selected' : ''}>About ${n} s</option>`).join('')}</select>
     </label>
-    <label>Layout
-      <select name="layout" data-remember="clip-layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
-    </label>
-    <label class="check"><input type="checkbox" name="trim_silence" value="1" data-remember="clip-trim" checked> Cut out pauses</label>
-    <button class="primary">${icon('split')}Create suggested clips</button>
+    <button class="primary">${icon('split')}Find scenes</button>
   </form>
 </section>`
     : ''
@@ -246,7 +252,57 @@ ${
   );
 }
 
-function clipPage(ctx, { campaign, clip, posts }) {
+// Pregled predloženih scena: korisnik ih presluša, odznači slabe i tek tada nastaju klipovi.
+function suggestPage(ctx, { campaign, rec, scenes, count, target, ffmpegOk }) {
+  const rows = scenes
+    .map(
+      (s, i) => `<li class="sg-row">
+      <label class="sg-pick"><input type="checkbox" name="scene" value="${s.start}-${s.end}" checked aria-label="Make a clip of scene ${i + 1}"></label>
+      <div class="sg-body">
+        <div class="sg-head">
+          <strong>${fmtTime(s.start)} to ${fmtTime(s.end)}</strong>
+          <span class="muted small">${(s.end - s.start).toFixed(1)} s</span>
+          <button type="button" data-scene-play="${s.start}" data-scene-end="${s.end}">Play</button>
+        </div>
+        <p class="sg-said">${h(s.said)}</p>
+        ${s.hook ? `<p class="muted small sg-hook"><button type="button" class="link" data-scene-play="${s.hook.start}" data-scene-end="${s.hook.end}">Hook</button> “${h(s.hookSaid)}”</p>` : '<p class="muted small sg-hook">No line stands out as a hook.</p>'}
+      </div>
+    </li>`
+    )
+    .join('');
+  return layout(
+    ctx,
+    'Suggested scenes',
+    `<div class="page-head">
+  <div class="head-title">${crumb(`/clipping/${campaign.id}`, h(campaign.name))}<h1>Suggested scenes</h1></div>
+</div>
+<p class="folder-hint lead">${scenes.length} ${scenes.length === 1 ? 'scene' : 'scenes'} of about ${target} s${scenes.length < count ? ` (you asked for ${count}; no more of this length were free)` : ''}. They are chosen by loudness and how much is said, so listen to each and untick the weak ones. Nothing is created until you select the button.</p>
+<div class="grid">
+  <section class="card sg-player">
+    <video class="player" id="suggest-player" src="/recordings/${rec.id}/file" controls preload="metadata"></video>
+  </section>
+  <section class="card">
+    <form method="post" action="/clipping/${campaign.id}/suggest" class="stack" id="suggest-form">
+      <ol class="sg-list">${rows}</ol>
+      <h2>For every clip</h2>
+      <label class="check"><input type="checkbox" name="auto_hook" value="1" data-remember="clip-autohook" checked> Open with the hook shown under each scene</label>
+      <label class="check"><input type="checkbox" name="trim_silence" value="1" data-remember="clip-trim" checked> Cut out pauses in the talking</label>
+      <label>Layout
+        <select name="layout" data-remember="clip-layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
+      </label>
+      ${ffmpegOk ? '' : '<div class="notice warn">ffmpeg is not installed, so clips cannot be created yet.</div>'}
+      <button class="primary big" id="suggest-submit"${ffmpegOk ? '' : ' disabled'}>${icon('split')}<span>Create ${scenes.length} ${scenes.length === 1 ? 'clip' : 'clips'}</span></button>
+    </form>
+  </section>
+</div>`
+  );
+}
+
+function clipPage(ctx, { campaign, clip, posts, lines, canEdit }) {
+  const edl = JSON.parse(clip.edl);
+  const hook = edl.find((p) => p.hook);
+  const scene = edl.filter((p) => !p.hook);
+  const trimmed = !(scene.length === 1 && scene[0].start === clip.start_s && scene[0].end === clip.end_s);
   const checks = checkClip(campaign, clip);
   const problems = checks.filter((c) => !c.ok).length;
   const postOf = (platform) => posts.find((p) => p.platform === platform) || {};
@@ -284,8 +340,38 @@ function clipPage(ctx, { campaign, clip, posts }) {
 </div>
 <div class="cap-layout">
   <section class="card">
-    <video class="kit-video" src="/clips/${clip.id}/file" poster="/clips/${clip.id}/thumb" controls preload="none" playsinline></video>
-    ${meta(`${(clip.length_s || 0).toFixed(1)} s`, fmtSize(clip.size), `from ${fmtTime(clip.start_s)} to ${fmtTime(clip.end_s)}`)}
+    <video class="kit-video" id="clip-player" src="/clips/${clip.id}/file?v=${clip.size}" poster="/clips/${clip.id}/thumb?v=${clip.size}" controls preload="none" playsinline></video>
+    ${meta(`${(clip.length_s || 0).toFixed(1)} s`, fmtSize(clip.size), `from ${fmtTime(clip.start_s)} to ${fmtTime(clip.end_s)}`, hook ? `hook from ${fmtTime(hook.start)}` : 'no hook')}
+    <details class="clip-edit">
+      <summary>Edit this clip</summary>
+      ${
+        canEdit
+          ? `<form method="post" action="/clipping/clips/${clip.id}/edit" class="stack">
+        <p class="muted small">Times are positions in the episode. Saving creates the clip again; your caption and posts stay.</p>
+        <div class="cap-style">
+          <label>Start<input name="start" value="${fmtFine(clip.start_s)}" required autocomplete="off"></label>
+          <label>End<input name="end" value="${fmtFine(clip.end_s)}" required autocomplete="off"></label>
+        </div>
+        <div class="cap-style">
+          <label>Hook from<input name="hook_start" value="${hook ? fmtFine(hook.start) : ''}" autocomplete="off"></label>
+          <label>Hook to<input name="hook_end" value="${hook ? fmtFine(hook.end) : ''}" autocomplete="off"></label>
+        </div>
+        <label class="check"><input type="checkbox" name="trim_silence" value="1"${trimmed ? ' checked' : ''}> Cut out pauses in the talking</label>
+        <label>Layout
+          <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}"${id === clip.layout ? ' selected' : ''}>${h(n)}</option>`).join('')}</select>
+        </label>
+        ${
+          lines.length
+            ? `<h3>Captions</h3>
+        <p class="muted small">Fix words that were heard wrong; empty a line to remove it. If you change the times above, the captions are taken from the transcript again and these fixes are lost.</p>
+        <ol class="cap-fix">${lines.map((l, i) => `<li><span class="muted small">${fmtTime(l.start)}</span><input name="line_${i}" value="${h(l.text)}" maxlength="200" data-seek="${l.start}" aria-label="Caption at ${fmtTime(l.start)}"></li>`).join('')}</ol>`
+            : ''
+        }
+        <div><button class="primary">${icon('split')}Save and create again</button></div>
+      </form>`
+          : '<p class="muted small">This clip cannot be changed: its episode is no longer in your recordings, or ffmpeg is missing.</p>'
+      }
+    </details>
   </section>
   <section class="card">
     <h2>Campaign rules ${problems ? `<span class="chip warn">${problems} to fix</span>` : '<span class="chip ok">All passed</span>'}</h2>
@@ -311,4 +397,4 @@ function clipPage(ctx, { campaign, clip, posts }) {
   );
 }
 
-module.exports = { campaignsPage, campaignPage, clipPage, fmtExact };
+module.exports = { campaignsPage, campaignPage, suggestPage, clipPage, fmtExact, fmtFine };

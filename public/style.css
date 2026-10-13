@@ -444,6 +444,28 @@ h2 .chip { margin-left: 0.5rem; vertical-align: middle; }
 .cl-suggest-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); align-items: end; gap: 0.85rem 1rem; }
 .cl-suggest-form label { margin: 0; }
 .cl-suggest-form .check { height: 38px; }
+/* Pregled predloženih scena i izmjena klipa */
+.sg-list { display: grid; gap: 0.6rem; margin: 0; padding: 0; list-style: none; }
+.sg-row { display: flex; gap: 0.75rem; padding: 0.7rem 0.8rem; border: 1px solid var(--line-soft); border-left: 3px solid var(--sky); border-radius: var(--r-control); background: #1f2124; }
+.sg-row.is-off { border-left-color: var(--line-soft); opacity: 0.55; }
+.sg-row.is-playing { background: color-mix(in srgb, var(--amber) 9%, #1f2124); }
+.sg-pick { margin: 0.15rem 0 0; }
+.sg-body { min-width: 0; flex: 1; }
+.sg-head { display: flex; align-items: center; gap: 0.6rem; }
+.sg-head button { height: 28px; margin-left: auto; padding: 0 0.7rem; font-size: 0.84rem; }
+.sg-said { display: -webkit-box; margin: 0.35rem 0; overflow: hidden; color: var(--soft); -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.sg-hook { margin: 0; }
+button.link { height: auto; padding: 0; border: 0; background: none; box-shadow: none; color: var(--sky); font: inherit; text-decoration: underline; }
+button.link:hover, button.link:active { background: none; box-shadow: none; transform: none; }
+.sg-player { position: sticky; top: 1rem; align-self: start; }
+.clip-edit { margin-top: 0.9rem; padding-top: 0.8rem; border-top: 1px solid var(--line-soft); }
+.clip-edit > summary { color: var(--text); font: 600 1rem var(--display); cursor: pointer; }
+.clip-edit[open] > summary { margin-bottom: 0.8rem; }
+.clip-edit h3 { margin: 0.4rem 0 0; font-size: 0.95rem; }
+.cap-fix { display: grid; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+.cap-fix li { display: flex; align-items: center; gap: 0.5rem; }
+.cap-fix li span { min-width: 2.4rem; font-variant-numeric: tabular-nums; }
+.cap-fix input { margin: 0; }
 .list-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
 .list-head h2 { margin: 0; }
 .list-head button { height: 32px; padding: 0 0.8rem; font-size: 0.85rem; }

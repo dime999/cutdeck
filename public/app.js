@@ -989,6 +989,56 @@ document.addEventListener('live:refresh', markLongDescriptions);
 window.addEventListener('resize', markLongDescriptions);
 markLongDescriptions();
 
+// ── Clipping: pregled predloženih scena ───────────────────
+const suggestForm = document.getElementById('suggest-form');
+if (suggestForm) {
+  const video = document.getElementById('suggest-player');
+  const button = document.getElementById('suggest-submit');
+  const label = button.querySelector('span');
+  const canCreate = !button.disabled;
+  const count = () => {
+    const boxes = [...suggestForm.querySelectorAll('input[name="scene"]')];
+    for (const box of boxes) box.closest('.sg-row').classList.toggle('is-off', !box.checked);
+    const n = boxes.filter((b) => b.checked).length;
+    label.textContent = n ? `Create ${n} ${n === 1 ? 'clip' : 'clips'}` : 'Select at least one scene';
+    button.disabled = !canCreate || !n;
+  };
+  suggestForm.addEventListener('change', count);
+  count();
+
+  // „Play“ pusti samo tu scenu (ili njen hook) i stane na njenom kraju.
+  let stopAt = null;
+  let row = null;
+  const done = () => {
+    if (row) row.classList.remove('is-playing');
+    stopAt = row = null;
+  };
+  suggestForm.addEventListener('click', (e) => {
+    const play = e.target.closest('[data-scene-play]');
+    if (!play) return;
+    done();
+    row = play.closest('.sg-row');
+    row.classList.add('is-playing');
+    stopAt = Number(play.dataset.sceneEnd);
+    video.currentTime = Number(play.dataset.scenePlay);
+    video.play().catch(() => {});
+  });
+  video.addEventListener('timeupdate', () => {
+    if (stopAt !== null && video.currentTime >= stopAt) {
+      video.pause();
+      done();
+    }
+  });
+}
+
+// ── Clipping: izmjena klipa, fokus na red titla premota video na njega ──
+const clipPlayer = document.getElementById('clip-player');
+if (clipPlayer) {
+  document.addEventListener('focusin', (e) => {
+    if (e.target.dataset && e.target.dataset.seek) clipPlayer.currentTime = Number(e.target.dataset.seek);
+  });
+}
+
 // ── Clipping: transkript, pretraga i forma za klip ────────
 const clippingForm = document.getElementById('clipping-form');
 if (clippingForm) {

@@ -206,6 +206,10 @@ addColumn('clips', 'campaign_id', 'INTEGER');
 addColumn('clips', 'edl', 'TEXT');
 addColumn('clips', 'length_s', 'REAL');
 addColumn('clips', 'caption', 'TEXT');
+// Redovi titlova klipa kampanje (JSON), da se riječi mogu ispraviti i klip ponovo napraviti.
+addColumn('clips', 'cap_lines', 'TEXT');
+// Glasnoća snimka u decibelima za svaku sekundu (JSON); iz nje se biraju hook i prijedlozi klipova.
+addColumn('recordings', 'levels', 'TEXT');
 
 db.now = () => new Date().toISOString();
 

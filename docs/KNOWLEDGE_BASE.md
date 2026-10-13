@@ -145,7 +145,10 @@ Odvojena sekcija za clipping kampanje, u kojima se po zadanim pravilima klipa tu
 - **Provjera pravila** na stranici klipa: dužina, titlovi, zabranjene riječi (naslov, opis, titlovi), napisan opis.
 - **Tekst za objavu** po platformi: opis + tag te platforme + hashtagovi kampanje. Za svaku platformu se bilježi da li je objavljeno i link.
 - **Upozorenje na ponavljanje** kad se nova scena barem 50% poklapa s postojećim klipom kampanje; redovi transkripta koji su već iskorišteni su označeni.
-- **Prijedlozi** (`suggestScenes`): transkript se dijeli u rečenice; kandidat je niz cijelih rečenica dužine 0,6 do 1,5 tražene dužine, bez tišine duže od 4 s. Ocjena je 50% glasnoća (iz `recordings.waveform`), 30% gustina govora, 10% upitne i usklične rečenice, 10% blizina traženoj dužini. Biraju se najbolji koji se ne preklapaju međusobno ni (50% ili više) s postojećim klipovima. Svaki postaje običan klip kampanje.
+- **Prijedlozi** (`suggestScenes`): transkript se dijeli u rečenice; kandidat je niz cijelih rečenica dužine 0,6 do 1,5 tražene dužine, bez tišine duže od 4 s. Ocjena je 50% glasnoća, 30% gustina govora, 10% upitne i usklične rečenice, 10% blizina traženoj dužini. Biraju se najbolji koji se ne preklapaju međusobno ni (50% ili više) s postojećim klipovima. `GET /clipping/:id/suggest` ih samo prikaže za pregled; klipovi nastaju tek iz označenih scena koje stignu u `POST`-u kao `scene=početak-kraj`. Ništa se ne čuva između ta dva koraka.
+- **Automatski hook** (`pickHook`): za svaku riječ scene (osim prve tri sekunde) gleda se prozor govora do 3 s; uzima se najglasniji, ako je barem 1 dB glasniji od prosjeka scene. Glasnoća je po sekundama (`recordings.levels`); snimci analizirani ranije dobiju je pri prvom traženju (`recordingLevels`).
+- **Izmjena klipa** (`POST /clipping/clips/:id/edit`): isti red u `clips` se vraća u red poslova i pravi u isti fajl. Ako je lista dijelova (`edl`) ostala ista, vrijede ispravke teksta iz forme (`cap_lines`); ako nije, titlovi se slažu iznova iz transkripta. Forma zato prikazuje vremena na stotinku.
+- **Čišćenje transkripta** (`cleanWords`): izbacuju se oznake poput `[NON-ENGLISH SPEECH]`, i kad se protežu preko više riječi, te crtice za promjenu govornika. Primjenjuje se i pri čitanju ranije nastalih transkripata.
 - **Varijacija**: link koji otvara formu s početkom i krajem postojećeg klipa.
 
 ## 5. Arhitektura
@@ -192,7 +195,7 @@ Sve je u folderu `data/`, koji nije u gitu.
 | Tabela | Šta čuva | Bitne kolone |
 |---|---|---|
 | `users` | Jedan lokalni korisnik | Sve ostalo pripada njemu preko `user_id` |
-| `recordings` | Snimci | `status` (pending, analyzing, ready, failed), `waveform` (JSON, 240 stubića 0–100), `hidden` |
+| `recordings` | Snimci | `status` (pending, analyzing, ready, failed), `waveform` (JSON, 240 stubića 0–100), `levels` (JSON, decibeli po sekundi), `hidden` |
 | `moments` | Prijedlozi trenutaka | `start_s`, `end_s`, `score` (0–100) |
 | `clips` | Shorts | `status` (pending, rendering, ready, failed), `layout`, `source_clip_id` i `subtitles` (Short s titlovima), `label` (natpis, JSON), `followup` (lanac, JSON) |
 | `captions` | Titlovi jednog Shorta | `status` (pending, transcribing, ready, failed), `lines` (JSON s riječima), `style` (JSON) |
@@ -209,7 +212,7 @@ Napomene:
 
 - U kodu se gotov video zove *export* (tabela `exports`), jer je ime `videos` zauzeto u bazama nastalim u vrijeme MultiPosta. Takve baze mogu imati i neiskorištene tabele `accounts`, `uploads`, `videos`, `jobs` te folder `data/uploads`.
 - Nove kolone se postojećim bazama dodaju funkcijom `addColumn` u `db.js`. `CREATE TABLE IF NOT EXISTS` ne mijenja postojeću tabelu, pa svaka nova kolona mora ići i tim putem.
-- Klip kampanje je red u `clips` s kolonama `campaign_id`, `edl` (JSON lista dijelova izvora, hook ima `hook: true`), `length_s` (stvarna dužina nakon rezova) i `caption` (opis za objavu). `start_s` i `end_s` su i dalje granice scene u epizodi.
+- Klip kampanje je red u `clips` s kolonama `campaign_id`, `edl` (JSON lista dijelova izvora, hook ima `hook: true`), `length_s` (stvarna dužina nakon rezova) i `caption` (opis za objavu) i `cap_lines` (redovi titlova, JSON, za ispravke). `start_s` i `end_s` su i dalje granice scene u epizodi.
 - Brisanje Shorta briše i njegove titlove (strani ključ) i njegov paket za objavu (ručno, u `deleteClip`).
 
 ## 7. Redovi poslova i lanac
@@ -314,7 +317,8 @@ Nakon premotavanja preglednik javi `seeked` prije nego što je kadar dostupan za
 | `GET`, `POST /clipping` | Lista kampanja, nova kampanja |
 | `GET`, `POST /clipping/:id`, `POST /clipping/:id/delete` | Stranica kampanje, izmjena pravila, brisanje |
 | `POST /clipping/:id/transcribe`, `POST /clipping/:id/clips` | Transkript epizode, novi klip |
-| `POST /clipping/:id/suggest`, `POST /clipping/:id/cancel` | Predloženi klipovi, prekid nedovršenih |
+| `GET`, `POST /clipping/:id/suggest`, `POST /clipping/:id/cancel` | Pregled predloženih scena, klipovi iz označenih, prekid nedovršenih |
+| `POST /clipping/clips/:id/edit` | Izmjena gotovog klipa i ponovno pravljenje |
 | `GET`, `POST /clipping/clips/:id`, `POST /clipping/clips/:id/delete` | Provjera pravila, tekst i evidencija objava; brisanje klipa |
 | `GET …/file`, `GET …/thumb` | Video i slike, uz podršku za Range |
 | `GET /api/studio/status` | Stanje poslova za osvježavanje stranica (`?campaign=N` za klipove kampanje, `?all=1` za bočni meni) |
@@ -379,7 +383,8 @@ Probni materijal je bio generisan: ffmpeg testna slika i sintetički Windows gla
 ## 14. Poznata ograničenja i neprovjereno
 
 - **Clipping je isproban samo na sintetičkom govoru od 90 sekundi.** Transkript cijele epizode od sat vremena nije mjeren (vrijeme, memorija), a izbacivanje pauza zavisi od tačnosti vremena riječi.
-- **Prijedlozi klipova** gledaju glasnoću i količinu govora, ne sadržaj. Glasnoća dolazi iz 240 odsječaka cijelog snimka, pa je kod epizode od sat vremena jedan odsječak 15 sekundi.
+- **Prijedlozi klipova i hook** gledaju glasnoću i količinu govora, ne sadržaj. Hook može početi usred rečenice.
+- **Greška u ffmpeg izlazu:** filter `whisper` ne označava navodnike u tekstu, pa se takav red čita ručno (`parseWhisperRow`).
 - **Clipping ne provjerava** da li je snimak iz prave epizode, da li je klip prijavljen i u drugu kampanju, niti publiku naloga. Zabranjene riječi se traže samo u tekstu, ne u slici.
 - **Pravi PS5 snimak nikad nije isproban.** Posebno HDR: boje u Shortu ili videu mogu ispasti isprane, jer konverzija HDR-a nije ugrađena.
 - **Tačnost titlova** je mjerena samo na sintetičkom glasu. S pravim glasom i glasnom igrom ispod njega može biti lošija.

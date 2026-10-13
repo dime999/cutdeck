@@ -333,6 +333,30 @@ function parseWhisperRow(row) {
   }
 }
 
+/**
+ * Izbacuje ono što nije govor: oznake poput [NON-ENGLISH SPEECH] ili (music), i kad se protežu
+ * preko više riječi, te crtice kojima model označava promjenu govornika. `key` je polje s tekstom riječi.
+ */
+function cleanWords(words, key = 'text') {
+  const out = [];
+  let open = 0; // koliko riječi već traje otvorena oznaka
+  for (const word of words) {
+    const text = String(word[key] || '');
+    const closes = /[\])][.,!?]*$/.test(text);
+    if (open) {
+      open = closes || open >= 6 ? 0 : open + 1; // oznaka bez kraja ne smije progutati ostatak govora
+      continue;
+    }
+    if (/^[[(]/.test(text)) {
+      if (!closes) open = 1;
+      continue;
+    }
+    if (/^[-–—]+$/.test(text)) continue;
+    out.push(word);
+  }
+  return out;
+}
+
 async function recognizeWords(file, duration, onProgress, signal) {
   const out = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.json`);
   // max_len=1 daje jedan zapis po riječi.
@@ -351,10 +375,10 @@ async function recognizeWords(file, duration, onProgress, signal) {
       const item = parseWhisperRow(row);
       if (!item) continue;
       const word = String(item.text || '').trim();
-      if (!word || /^[[(].*[\])]$/.test(word)) continue;
+      if (!word) continue;
       words.push({ start: item.start / 1000, end: item.end / 1000, text: word });
     }
-    return words;
+    return cleanWords(words);
   } finally {
     fs.rm(out, { force: true }, () => {});
   }
@@ -521,6 +545,7 @@ module.exports = {
   renderJoined,
   transcribeProblem,
   recognizeWords,
+  cleanWords,
   linesFromWords,
   transcribe,
   tidyLines,
