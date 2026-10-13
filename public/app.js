@@ -465,6 +465,7 @@ if (thumbCanvas) {
   function seek(time) {
     const t = clamp(time, 0, Number(timeInput.max));
     timeInput.value = t;
+    syncRange(timeInput);
     get('thumb-time-label').textContent = fmt(t);
     video.currentTime = t;
   }
@@ -493,7 +494,10 @@ if (thumbCanvas) {
       for (const s of document.querySelectorAll('.swatch')) s.classList.toggle('is-picked', s === button);
       draw();
     } else if (button.id === 'thumb-reset') {
-      for (const id of ['thumb-zoom', 'thumb-brightness', 'thumb-contrast', 'thumb-saturation']) get(id).value = get(id).dataset.default;
+      for (const id of ['thumb-zoom', 'thumb-brightness', 'thumb-contrast', 'thumb-saturation']) {
+        get(id).value = get(id).dataset.default;
+        syncRange(get(id));
+      }
       state.panX = state.panY = 0;
       draw();
     }
@@ -849,6 +853,112 @@ if (splitForm) {
     update();
   });
   update();
+}
+
+// ── Poruke u uglu ─────────────────────────────────────────
+// Potvrda uspjeha sama nestane; greška ostaje dok je korisnik ne zatvori.
+function dismissToast(toast) {
+  toast.classList.add('is-leaving');
+  setTimeout(() => toast.remove(), 220);
+}
+for (const toast of document.querySelectorAll('.toast')) {
+  if (!toast.classList.contains('bad')) setTimeout(() => dismissToast(toast), 6000);
+}
+document.addEventListener('click', (e) => {
+  const close = e.target.closest('[data-toast-close]');
+  if (close) dismissToast(close.closest('.toast'));
+});
+
+// ── Meniji sa dodatnim akcijama ───────────────────────────
+// Otvoren je najviše jedan; zatvara ga klik sa strane ili Esc.
+document.addEventListener('click', (e) => {
+  for (const menu of document.querySelectorAll('details.menu[open]')) {
+    if (!menu.contains(e.target)) menu.open = false;
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const menu = document.querySelector('details.menu[open]');
+  if (!menu) return;
+  menu.open = false;
+  menu.querySelector('summary').focus();
+});
+
+// ── Dugme pokazuje da je zahtjev poslan ───────────────────
+// Sprječava i dvostruki klik. Forme koje šalju same (fetch) ili čekaju potvrdu su već zaustavile slanje.
+document.addEventListener('submit', (e) => {
+  if (e.defaultPrevented || e.target.method === 'dialog') return;
+  const button = e.submitter || e.target.querySelector('button:not([type="button"])');
+  if (!button) return;
+  button.classList.add('is-loading');
+  button.setAttribute('aria-busy', 'true');
+  setTimeout(() => (button.disabled = true)); // tek nakon slanja, da ime i vrijednost dugmeta odu sa formom
+});
+// Povratak na stranicu dugmetom „nazad“ ne smije ostaviti dugme zaključano.
+window.addEventListener('pageshow', () => {
+  for (const button of document.querySelectorAll('.is-loading')) {
+    button.classList.remove('is-loading');
+    button.removeAttribute('aria-busy');
+    button.disabled = false;
+  }
+});
+
+// ── Klizači: obojeni dio trake prati vrijednost ───────────
+function syncRange(input) {
+  const min = Number(input.min || 0);
+  const max = Number(input.max || 100);
+  input.style.setProperty('--fill', `${max > min ? ((Number(input.value) - min) / (max - min)) * 100 : 0}%`);
+}
+document.addEventListener('input', (e) => {
+  if (e.target.type === 'range') syncRange(e.target);
+});
+for (const input of document.querySelectorAll('input[type="range"]')) syncRange(input);
+
+// ── Zona za fajl: pokazuje šta je izabrano ────────────────
+const bumperDrop = document.getElementById('bumper-drop');
+if (bumperDrop) {
+  const input = bumperDrop.querySelector('input');
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    bumperDrop.classList.toggle('has-file', Boolean(file));
+    if (!file) return;
+    document.getElementById('bumper-drop-text').textContent = file.name;
+    const mb = file.size / 1024 ** 2;
+    document.getElementById('bumper-drop-hint').textContent = mb >= 1 ? `${mb.toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+  });
+  for (const type of ['dragenter', 'dragover']) bumperDrop.addEventListener(type, () => bumperDrop.classList.add('is-over'));
+  for (const type of ['dragleave', 'drop']) bumperDrop.addEventListener(type, () => bumperDrop.classList.remove('is-over'));
+}
+
+// ── Šta se pravi u pozadini (bočni meni) ──────────────────
+const sideActivity = document.getElementById('side-activity');
+if (sideActivity) {
+  const WORKING = ['pending', 'rendering', 'analyzing', 'transcribing'];
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  async function refreshActivity() {
+    if (document.hidden) return;
+    try {
+      const r = await fetch('/api/studio/status');
+      if (!r.ok) return;
+      const count = { clip: 0, video: 0, rec: 0, captions: 0 };
+      for (const item of (await r.json()).items) {
+        if (WORKING.includes(item.status)) count[item.key.split(':')[0]]++;
+      }
+      const parts = [
+        count.clip && `creating ${plural(count.clip, 'Short', 'Shorts')}`,
+        count.captions && `captioning ${plural(count.captions, 'Short', 'Shorts')}`,
+        count.video && `creating ${plural(count.video, 'video', 'videos')}`,
+        count.rec && `analyzing ${plural(count.rec, 'recording', 'recordings')}`,
+      ].filter(Boolean);
+      sideActivity.hidden = parts.length === 0;
+      if (!parts.length) return;
+      const text = parts.join(', ');
+      document.getElementById('side-activity-text').textContent = text[0].toUpperCase() + text.slice(1);
+      sideActivity.href = count.clip || count.captions ? '/shorts' : count.video ? '/videos' : '/recordings';
+    } catch {}
+  }
+  refreshActivity();
+  setInterval(refreshActivity, 4000);
 }
 
 // Pregled Shorta dok je miš iznad njega

@@ -301,7 +301,16 @@ Uzor su alati za video (DaVinci Resolve, CapCut, Frame.io). Ideja je radni sto z
 - Samo tamna tema.
 - Potvrda prije brisanja je prozor u stilu aplikacije (`<dialog>`). Tekst dolazi iz atributa `data-confirm`: dio do prvog upitnika je naslov, ostatak objašnjenje.
 
-Sve boje i zaobljenja su varijable na vrhu `style.css`.
+Kontrole su oblikovane kao dugmad na uređaju (blagi sjaj odozgo, sjena ispod, pomak pri pritisku) i imaju ista pravila na svim stranicama:
+
+- **Dugmad:** glavna akcija je jantarna, ostale sive, brisanje crveno. Nakon klika dugme pokazuje da je zahtjev poslan i ne prima drugi klik.
+- **Polja:** udubljena, s plavim okvirom u fokusu. Kvačice u formama su prekidači, a klizači pokazuju vrijednost obojenim dijelom trake (`--fill` postavlja `app.js`).
+- **Pločice:** najviše dvije vidljive akcije; ostale su u meniju iza tri tačke (`<details class="menu">`).
+- **Poruke** nakon akcije iskaču u donjem desnom uglu; potvrda sama nestane, greška ostaje dok se ne zatvori.
+- **Bočni meni** pokazuje šta se trenutno pravi u pozadini, sa svake stranice.
+- **Prazne liste** kažu šta tu nastaje i čime se počinje.
+
+Sve boje, zaobljenja i visine kontrola su varijable na vrhu `style.css`. Pomoćne funkcije za ikone, meni, link nazad i prazno stanje su na vrhu `views.js` (`icon`, `menu`, `crumb`, `emptyState`).
 
 ## 11. Podešavanja (`.env`)
 

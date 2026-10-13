@@ -13,9 +13,32 @@ const ICONS = {
   thumbnails: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M2.5 11l3.2-3.2 2.4 2.4 1.9-1.9 3.5 3.5"/>',
   videos: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M6.7 6.1v3.8L10.1 8z" fill="currentColor"/>',
   bumpers: '<path d="M3 3.5v9M13 3.5v9"/><rect x="5.5" y="5.5" width="5" height="5" rx="1"/>',
+  download: '<path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13.5h10"/>',
+  upload: '<path d="M8 10.5v-8M4.8 5.7 8 2.5l3.2 3.2M3 13.5h10"/>',
+  trash: '<path d="M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.6 8.5h5.8l.6-8.5M6.8 7v3.5M9.2 7v3.5"/>',
+  more: '<circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/>',
+  scan: '<path d="M13 8a5 5 0 1 1-1.6-3.7M13 2.8v2.6h-2.6"/>',
+  split: '<circle cx="4" cy="4.5" r="1.7"/><circle cx="4" cy="11.5" r="1.7"/><path d="M5.4 5.6 13 12M5.4 10.4 13 4"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  back: '<path d="M9.5 3.5 5 8l4.5 4.5"/>',
+  external: '<path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5"/>',
+  merge: '<path d="M8 2.5 13.5 5.5 8 8.5 2.5 5.5zM2.5 8.5 8 11.5l5.5-3M2.5 11 8 14l5.5-3"/>',
+  captions: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M4.5 9.8h3M9 9.8h2.5M4.5 7.5h1.5M7.5 7.5h4"/>',
+  kit: '<path d="M13.5 2.5 7 9M13.5 2.5 9.5 13.5 7 9 2.5 6.5z"/>',
+  stop: '<rect x="4" y="4" width="8" height="8" rx="1.5"/>',
+  close: '<path d="M4 4l8 8M12 4l-8 8"/>',
 };
 const icon = (name) =>
   `<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name]}</svg>`;
+// Link nazad iznad naslova stranice.
+const crumb = (href, label) => `<a class="crumb" href="${href}">${icon('back')}${label}</a>`;
+// Meni sa dodatnim akcijama iza dugmeta sa tri tačke. `items` su linkovi i forme.
+const menu = (label, items, cls = '') =>
+  `<details class="menu${cls ? ` ${cls}` : ''}"><summary class="button icon-only" aria-label="${label}" title="More actions">${icon('more')}</summary><div class="menu-list">${items}</div></details>`;
+// Prazna lista: ikona, šta ovdje nastaje i kako početi.
+const emptyState = (iconName, title, text, action = '') =>
+  `<div class="empty">${icon(iconName)}<strong>${title}</strong><p>${text}</p>${action}</div>`;
+
 // Znak aplikacije: jedan blok presječen na dva dijela.
 const BRAND_MARK = '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3H11l-3 14H4.5A1.5 1.5 0 0 1 3 15.5z" fill="#ffb02e"/><path d="M13 3h2.5A1.5 1.5 0 0 1 17 4.5v11a1.5 1.5 0 0 1-1.5 1.5H10z" fill="#6cb6ff"/></svg>';
 
@@ -26,7 +49,7 @@ function layout(ctx, title, body) {
     return `<a href="${href}"${active ? ' class="active" aria-current="page"' : ''}>${icon(name)}<span>${label}</span></a>`;
   };
   const flash = ctx.flash
-    ? `<div class="flash ${h(ctx.flash.type)}" role="status">${h(ctx.flash.msg)}</div>`
+    ? `<div class="toast ${h(ctx.flash.type)}" role="status"><p>${h(ctx.flash.msg)}</p><button type="button" data-toast-close aria-label="Dismiss">${icon('close')}</button></div>`
     : '';
   const favicon = encodeURIComponent(BRAND_MARK.replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" '));
   return `<!doctype html>
@@ -40,6 +63,7 @@ function layout(ctx, title, body) {
 <link rel="icon" href="data:image/svg+xml,${favicon}">
 </head>
 <body>
+<a class="skip" href="#main">Skip to content</a>
 <div class="shell">
   <aside class="side">
     <a class="brand" href="/">${BRAND_MARK}<span>${h(cfg.appName)}</span></a>
@@ -53,13 +77,14 @@ function layout(ctx, title, body) {
       <p class="side-label">Assets</p>
       ${nav('/bumpers', 'Intros and outros', 'bumpers')}
     </nav>
+    <a class="side-activity" id="side-activity" href="/shorts" hidden><span class="spinner"></span><span id="side-activity-text"></span></a>
     <p class="side-foot"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></p>
   </aside>
-  <main>
-${flash}
+  <main id="main">
 ${body}
   </main>
 </div>
+<div class="toasts" id="toasts" aria-live="polite">${flash}</div>
 <script src="/static/app.js" defer></script>
 </body>
 </html>`;
@@ -106,8 +131,8 @@ function queueBar(clips, recordingId = '') {
   if (!unfinished && !chained) return '';
   const what = [unfinished && `${unfinished} ${unfinished === 1 ? 'Short' : 'Shorts'} still to be created`, chained && `${chained} waiting for captions, intro or outro`].filter(Boolean).join(', ');
   return `<div class="queue-bar">
-    <span>${what}.</span>
-    <form method="post" action="/shorts/cancel${recordingId ? `?recording=${recordingId}` : ''}" data-confirm="Stop creating Shorts? The ones that are not finished are removed, and no more captions, intros or outros are added. Finished Shorts stay."><button class="danger-outline">Stop creating Shorts</button></form>
+    <span><span class="spinner"></span>${what}.</span>
+    <form method="post" action="/shorts/cancel${recordingId ? `?recording=${recordingId}` : ''}" data-confirm="Stop creating Shorts? The ones that are not finished are removed, and no more captions, intros or outros are added. Finished Shorts stay."><button class="danger-outline">${icon('stop')}Stop creating Shorts</button></form>
   </div>`;
 }
 
@@ -164,6 +189,7 @@ function shortTiles(clips, { from = '' } = {}) {
       } else {
         frame = `<div class="short-frame is-busy"><p>${c.status === 'rendering' ? 'Creating…' : 'Waiting its turn'}</p>${c.status === 'rendering' ? progressBar(c.progress) : ''}</div>`;
       }
+      const remove = `<form method="post" action="/clips/${c.id}/delete${from ? `?from=${from}` : ''}" data-confirm="Delete the Short “${h(c.title)}”? Its video file will be deleted too."><button class="danger-outline">${icon('trash')}Delete</button></form>`;
       return `<li class="short" data-poll-key="clip:${c.id}" data-state="${h(c.status)}">
       <label class="pick"><input type="checkbox" name="ids" value="${c.id}" form="bulk-form" aria-label="Select “${h(c.title)}”"></label>
       ${frame}
@@ -174,14 +200,16 @@ function shortTiles(clips, { from = '' } = {}) {
           c.status === 'ready'
             ? `<a class="button primary" href="/clips/${c.id}/file?download=1">Download</a>
                <a class="button" href="/publish/clip/${c.id}">Publish kit</a>
-               <a class="button" href="/clips/${c.id}/captions">Captions</a>
-               <a class="button" href="/videos/new?clip=${c.id}">Intro and outro</a>`
-            : ''
-        }
-        ${
-          c.status === 'rendering' || c.status === 'pending'
-            ? `<form method="post" action="/clips/${c.id}/cancel${from ? `?from=${from}` : ''}"><button>Cancel</button></form>`
-            : `<form method="post" action="/clips/${c.id}/delete${from ? `?from=${from}` : ''}" data-confirm="Delete the Short “${h(c.title)}”? Its video file will be deleted too."><button class="danger-outline">Delete</button></form>`
+               ${menu(
+                 `More actions for “${h(c.title)}”`,
+                 `<a href="/clips/${c.id}/captions">${icon('captions')}Captions</a>
+                 <a href="/videos/new?clip=${c.id}">${icon('bumpers')}Intro and outro</a>
+                 <hr>
+                 ${remove}`
+               )}`
+            : c.status === 'failed'
+              ? remove
+              : `<form method="post" action="/clips/${c.id}/cancel${from ? `?from=${from}` : ''}"><button>${icon('stop')}Cancel</button></form>`
         }
       </div>
     </li>`;
@@ -192,7 +220,7 @@ function shortTiles(clips, { from = '' } = {}) {
   return `<form method="post" action="/shorts/delete${recording ? `?recording=${recording}` : ''}" id="bulk-form" class="bulk-bar" data-confirm="Delete the selected Shorts?">
     <label class="check"><input type="checkbox" id="bulk-all"> Select all</label>
     <span class="muted" id="bulk-count">None selected</span>
-    <button class="danger-outline" id="bulk-delete" disabled>Delete selected</button>
+    <button class="danger-outline" id="bulk-delete" disabled>${icon('trash')}Delete selected</button>
   </form>
   <ul class="shorts">${tiles}</ul>`;
 }
@@ -243,14 +271,14 @@ function recordingsPage(ctx, { recordings, ffmpegOk, folder }) {
     'Recordings',
     `<div class="page-head">
   <h1>Recordings</h1>
-  <form method="post" action="/recordings/scan"><button class="primary">Scan folder</button></form>
+  <form method="post" action="/recordings/scan"><button class="primary">${icon('scan')}Scan folder</button></form>
 </div>
 ${ffmpegNotice(ffmpegOk)}
 <div id="live-recordings" data-live>
 ${
   recordings.length
     ? `<ul class="recs">${rows}</ul>`
-    : `<div class="empty">Copy a gameplay recording into the folder below, then select “Scan folder”.</div>`
+    : emptyState('recordings', 'No recordings yet', 'Copy a gameplay recording into the folder below, then select “Scan folder”.')
 }
 ${studioPoll(busy && ffmpegOk)}
 </div>
@@ -306,13 +334,20 @@ ${
     ctx,
     rec.name,
     `<div class="page-head">
-  <h1>${h(rec.name)}</h1>
+  <div class="head-title">${crumb('/recordings', 'Recordings')}<h1>${h(rec.name)}</h1></div>
   <div class="head-actions">
-    ${rec.status === 'ready' ? `<a class="button primary" href="/recordings/${rec.id}/split">Split into Shorts</a>
-    <a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">Create thumbnail</a>
-    <a class="button" href="/videos/new?recording=${rec.id}">Add intro and outro</a>
-    <a class="button" href="/publish/recording/${rec.id}">Publish kit</a>` : ''}
-    <a class="button" href="/recordings">All recordings</a>
+    ${
+      rec.status === 'ready'
+        ? `<a class="button primary" href="/recordings/${rec.id}/split">${icon('split')}Split into Shorts</a>
+    <a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">${icon('thumbnails')}Create thumbnail</a>
+    ${menu(
+      'More actions for this recording',
+      `<a href="/videos/new?recording=${rec.id}">${icon('bumpers')}Add intro and outro</a>
+      <a href="/publish/recording/${rec.id}">${icon('kit')}Publish kit</a>`,
+      'drop-down'
+    )}`
+        : ''
+    }
   </div>
 </div>
 ${ffmpegNotice(ffmpegOk)}
@@ -346,7 +381,7 @@ ${ffmpegNotice(ffmpegOk)}
       <label>Intro<select name="auto_intro" data-remember="auto-intro"><option value="">No intro</option>${bumperOptions}</select></label>
       <label>Outro<select name="auto_outro" data-remember="auto-outro"><option value="">No outro</option>${bumperOptions}</select></label>
       <p class="muted small">3 to 180 seconds, vertical 1080×1920. Captions use the style you last saved on a captions page. With an intro or outro the finished video appears under Videos; otherwise under Shorts.</p>
-      <button class="primary big">Create Short</button>
+      <button class="primary big">${icon('split')}Create Short</button>
     </form>
   </section>
 </div>
@@ -354,7 +389,7 @@ ${ffmpegNotice(ffmpegOk)}
 <div id="live-clips" data-live>
   <h2>Shorts from this recording</h2>
   ${queueBar(clips, rec.id)}
-  ${clips.length ? shortTiles(clips, { from: 'recording' }) : '<div class="empty">Pick a moment above and select “Create Short”.</div>'}
+  ${clips.length ? shortTiles(clips, { from: 'recording' }) : emptyState('shorts', 'No Shorts from this recording yet', 'Pick a moment above and select “Create Short”.')}
   ${studioPoll(busy && ffmpegOk, rec.id, 'clip')}
 </div>`
   );
@@ -367,12 +402,12 @@ function shortsPage(ctx, { clips, ffmpegOk }) {
     'Shorts',
     `<div class="page-head">
   <h1>Shorts</h1>
-  <a class="button primary" href="/recordings">Create from a recording</a>
+  <a class="button primary" href="/recordings">${icon('plus')}Create from a recording</a>
 </div>
 ${ffmpegNotice(ffmpegOk)}
 <div id="live-clips" data-live>
 ${queueBar(clips)}
-${clips.length ? shortTiles(clips) : '<div class="empty">Open a recording, pick a moment and create your first Short.</div>'}
+${clips.length ? shortTiles(clips) : emptyState('shorts', 'No Shorts yet', 'Open a recording, pick a moment and create your first Short.', '<a class="button" href="/recordings">Go to Recordings</a>')}
 ${studioPoll(busy && ffmpegOk, '', 'clip')}
 </div>`
   );
@@ -397,8 +432,8 @@ function thumbnailsPage(ctx, { thumbnails }) {
       <strong class="short-title">${h(t.title)}</strong>
       ${meta(h(t.recording_name), fmtSize(t.size), `<time data-local="${h(t.created_at)}">${h(t.created_at)}</time>`)}
       <div class="short-actions">
-        <a class="button primary" href="/thumbnails/${t.id}/file?download=1">Download</a>
-        <form method="post" action="/thumbnails/${t.id}/delete" data-confirm="Delete the thumbnail “${h(t.title)}”?"><button class="danger-outline">Delete</button></form>
+        <a class="button primary" href="/thumbnails/${t.id}/file?download=1">${icon('download')}Download</a>
+        <form method="post" action="/thumbnails/${t.id}/delete" data-confirm="Delete the thumbnail “${h(t.title)}”?"><button class="danger-outline">${icon('trash')}Delete</button></form>
       </div>
     </li>`
     )
@@ -408,9 +443,9 @@ function thumbnailsPage(ctx, { thumbnails }) {
     'Thumbnails',
     `<div class="page-head">
   <h1>Thumbnails</h1>
-  <a class="button primary" href="/recordings">Create from a recording</a>
+  <a class="button primary" href="/recordings">${icon('plus')}Create from a recording</a>
 </div>
-${thumbnails.length ? `<ul class="thumbs">${tiles}</ul>` : '<div class="empty">Open a recording and select “Create thumbnail” to make the first one.</div>'}`
+${thumbnails.length ? `<ul class="thumbs">${tiles}</ul>` : emptyState('thumbnails', 'No thumbnails yet', 'Open a recording and select “Create thumbnail” to make the first one.', '<a class="button" href="/recordings">Go to Recordings</a>')}`
   );
 }
 
@@ -422,8 +457,7 @@ function thumbnailEditorPage(ctx, { rec, moments, time }) {
     ctx,
     'Create thumbnail',
     `<div class="page-head">
-  <h1>Create thumbnail</h1>
-  <a class="button" href="/recordings/${rec.id}">Back to the recording</a>
+  <div class="head-title">${crumb(`/recordings/${rec.id}`, 'Back to the recording')}<h1>Create thumbnail</h1></div>
 </div>
 <div class="grid">
   <section class="card">
@@ -492,7 +526,7 @@ function bumpersPage(ctx, { bumpers, ffmpegOk }) {
       <strong class="short-title">${h(b.name)}</strong>
       ${meta(`${b.width}×${b.height}`, fmtSize(b.size), b.has_audio ? '' : 'no sound')}
       <div class="short-actions">
-        <form method="post" action="/bumpers/${b.id}/delete" data-confirm="Delete “${h(b.name)}”? Videos already created with it stay as they are."><button class="danger-outline">Delete</button></form>
+        <form method="post" action="/bumpers/${b.id}/delete" data-confirm="Delete “${h(b.name)}”? Videos already created with it stay as they are."><button class="danger-outline">${icon('trash')}Delete</button></form>
       </div>
     </li>`
     )
@@ -507,17 +541,17 @@ ${ffmpegNotice(ffmpegOk)}
 <section class="card">
   <h2>Add a clip</h2>
   <form id="bumper-form" class="stack">
-    <label>Video file<input type="file" id="bumper-file" accept="video/*" required></label>
+    <label class="drop" id="bumper-drop">${icon('upload')}<strong id="bumper-drop-text">Choose a video or drag it here</strong><span id="bumper-drop-hint">MP4, MOV, MKV or WebM, up to 1 GB</span><input type="file" id="bumper-file" accept="video/*" required aria-label="Video file"></label>
     <label>Name <span class="muted">(optional)</span><input id="bumper-name" maxlength="60" placeholder="Channel intro"></label>
     <p class="error" id="bumper-error" hidden></p>
     <div class="progress" id="bumper-progress" hidden><div class="bar"></div><span class="label"></span></div>
-    <div><button class="primary">Add clip</button></div>
+    <div><button class="primary">${icon('plus')}Add clip</button></div>
   </form>
 </section>
 ${
   bumpers.length
     ? `<ul class="thumbs">${tiles}</ul>`
-    : '<div class="empty">Add the intro and outro clips you made for your channel. Any clip can be used at the start or at the end of a video.</div>'
+    : emptyState('bumpers', 'No intro or outro clips yet', 'Add the clips you made for your channel. Any clip can be used at the start or at the end of a video.')
 }`
   );
 }
@@ -528,8 +562,7 @@ function videoNewPage(ctx, { source, bumpers }) {
     ctx,
     'Add intro and outro',
     `<div class="page-head">
-  <h1>Add intro and outro</h1>
-  <a class="button" href="${source.back}">Back</a>
+  <div class="head-title">${crumb(source.back, 'Back')}<h1>Add intro and outro</h1></div>
 </div>
 <section class="card form-card">
   <p class="form-source"><strong>${h(source.name)}</strong></p>
@@ -572,8 +605,7 @@ function videoMergePage(ctx, { groups, ffmpegOk }) {
     ctx,
     'Merge videos',
     `<div class="page-head">
-  <h1>Merge videos</h1>
-  <a class="button" href="/videos">Back</a>
+  <div class="head-title">${crumb('/videos', 'Videos')}<h1>Merge videos</h1></div>
 </div>
 ${ffmpegNotice(ffmpegOk)}
 ${
@@ -621,20 +653,20 @@ function videosPage(ctx, { videos, ffmpegOk }) {
         frame = `<div class="thumb-frame is-busy"><p>${v.status === 'rendering' ? 'Creating…' : 'Waiting its turn'}</p>${v.status === 'rendering' ? progressBar(v.progress) : ''}</div>`;
       }
       let actions;
-      if (v.status === 'ready') actions = `<a class="button primary" href="/videos/${v.id}/file?download=1">Download</a>\n        <a class="button" href="/publish/video/${v.id}">Publish kit</a>`;
-      else if (v.status === 'rendering') actions = `<form method="post" action="/videos/${v.id}/cancel"><button>Cancel</button></form>`;
-      else actions = '';
+      const remove = `<form method="post" action="/videos/${v.id}/delete" data-confirm="Delete the video “${h(v.title)}”? Its file will be deleted too."><button class="danger-outline">${icon('trash')}Delete</button></form>`;
+      if (v.status === 'ready') {
+        actions = `<a class="button primary" href="/videos/${v.id}/file?download=1">${icon('download')}Download</a>
+        <a class="button" href="/publish/video/${v.id}">Publish kit</a>
+        ${menu(`More actions for “${h(v.title)}”`, remove)}`;
+      }
+      else if (v.status === 'rendering') actions = `<form method="post" action="/videos/${v.id}/cancel"><button>${icon('stop')}Cancel</button></form>`;
+      else actions = remove;
       return `<li class="thumb" data-poll-key="video:${v.id}" data-state="${h(v.status)}">
       ${frame}
       <strong class="short-title">${h(v.title)}</strong>
       ${meta(v.published ? PUBLISHED : '', parts, v.size ? fmtSize(v.size) : '', v.width ? `${v.width}×${v.height}` : '')}
       <div class="short-actions">
         ${actions}
-        ${
-          v.status === 'rendering'
-            ? ''
-            : `<form method="post" action="/videos/${v.id}/delete" data-confirm="Delete the video “${h(v.title)}”? Its file will be deleted too."><button class="danger-outline">Delete</button></form>`
-        }
       </div>
     </li>`;
     })
@@ -646,13 +678,13 @@ function videosPage(ctx, { videos, ffmpegOk }) {
     `<div class="page-head">
   <h1>Videos</h1>
   <div class="head-actions">
-    <a class="button" href="/bumpers">Intros and outros</a>
-    <a class="button primary" href="/videos/merge">Merge videos</a>
+    <a class="button" href="/bumpers">${icon('bumpers')}Intros and outros</a>
+    <a class="button primary" href="/videos/merge">${icon('merge')}Merge videos</a>
   </div>
 </div>
 ${ffmpegNotice(ffmpegOk)}
 <div id="live-videos" data-live>
-${videos.length ? `<ul class="thumbs">${tiles}</ul>` : '<div class="empty">Select “Merge videos” to join several videos into one, or open a recording or a Short and select “Add intro and outro”.</div>'}
+${videos.length ? `<ul class="thumbs">${tiles}</ul>` : emptyState('videos', 'No videos yet', 'Select “Merge videos” to join several videos into one, or open a recording or a Short and add an intro and outro.')}
 ${studioPoll(busy && ffmpegOk)}
 </div>`
   );
@@ -738,8 +770,7 @@ ${generate(status === 'failed' ? 'Try again' : 'Generate captions')}`;
     ctx,
     'Captions',
     `<div class="page-head">
-  <h1>Captions</h1>
-  <a class="button" href="/shorts">Back to Shorts</a>
+  <div class="head-title">${crumb('/shorts', 'Shorts')}<h1>Captions</h1></div>
 </div>
 <div class="cap-layout">
   <section class="card">
@@ -788,17 +819,16 @@ function kitPage(ctx, { item, kit, thumbnails, isNew }) {
     ctx,
     'Publish kit',
     `<div class="page-head">
-  <h1>Publish kit</h1>
+  <div class="head-title">${crumb(item.back, 'Back')}<h1>Publish kit</h1></div>
   <div class="head-actions">
-    <a class="button" href="https://studio.youtube.com" target="_blank" rel="noopener">Open YouTube Studio</a>
-    <a class="button" href="${item.back}">Back</a>
+    <a class="button" href="https://studio.youtube.com" target="_blank" rel="noopener">${icon('external')}Open YouTube Studio</a>
   </div>
 </div>
 <div class="cap-layout${item.vertical ? '' : ' kit-wide'}">
   <section class="card">
     <p class="form-source"><strong>${h(item.name)}</strong></p>
     <video class="kit-video" src="${item.file}" poster="${item.poster}" controls preload="none" playsinline></video>
-    <a class="button primary" href="${item.file}?download=1">Download video</a>
+    <a class="button primary" href="${item.file}?download=1">${icon('download')}Download video</a>
   </section>
   <section class="card">
     <form method="post" action="/publish/${item.kind}/${item.id}" class="stack">
@@ -841,8 +871,7 @@ function splitPage(ctx, { rec, bumpers, captionsProblem, ffmpegOk }) {
     ctx,
     'Split into Shorts',
     `<div class="page-head">
-  <h1>Split into Shorts</h1>
-  <a class="button" href="/recordings/${rec.id}">Back to the recording</a>
+  <div class="head-title">${crumb(`/recordings/${rec.id}`, 'Back to the recording')}<h1>Split into Shorts</h1></div>
 </div>
 ${ffmpegNotice(ffmpegOk)}
 <section class="card form-card">

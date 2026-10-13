@@ -2,24 +2,30 @@
   CutDeck: radni sto za montažu.
   Neutralna grafitna podloga (kao u programima za montažu, da ne mijenja utisak boja videa),
   jantarna za zvuk i glavne akcije, plava za ono što je korisnik izabrao.
+  Kontrole su oblikovane kao dugmad na uređaju: blagi sjaj odozgo, sjena ispod, pomak pri pritisku.
 */
 :root {
   --deck: #1b1c1f;      /* podloga stranice */
-  --rail: #151618;      /* bočni meni i udubljene trake */
+  --rail: #151618;      /* bočni meni i udubljena polja */
   --panel: #24262a;     /* ploče */
-  --raised: #2e3136;    /* dugmad i polja iznad ploče */
+  --raised: #2e3136;    /* dugmad i sve što stoji iznad ploče */
+  --raised-hi: #383b42;
   --line: #3a3d44;
   --line-soft: #2f3237;
   --text: #ecedef;
+  --soft: #c6c9cf;      /* oznake polja */
   --muted: #9da1aa;
   --amber: #ffb02e;     /* zvuk, glasni trenuci, glavna akcija */
   --amber-ink: #1f1500; /* tekst na jantarnoj */
   --sky: #6cb6ff;       /* izbor, fokus, linkovi */
   --ok: #4cd39a;
   --bad: #ff6b6b;
-  --r-control: 6px;
-  --r-panel: 10px;
-  --r-media: 8px;
+  --r-control: 8px;
+  --r-panel: 12px;
+  --r-media: 10px;
+  --control-h: 36px;
+  --ring: 0 0 0 3px color-mix(in srgb, var(--sky) 28%, transparent);
+  --shadow-pop: 0 18px 48px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 35%);
   --display: Bahnschrift, "DIN Alternate", "Roboto Condensed", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
   --body: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
   color-scheme: dark;
@@ -28,7 +34,7 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html { scrollbar-color: #4a4e57 transparent; }
-body { margin: 0; background: var(--deck); color: var(--text); font: 14px/1.5 var(--body); }
+body { margin: 0; background: var(--deck); color: var(--text); font: 14px/1.5 var(--body); -webkit-font-smoothing: antialiased; }
 ::selection { background: color-mix(in srgb, var(--sky) 45%, transparent); }
 a { color: var(--sky); text-underline-offset: 2px; }
 p { margin: 0 0 0.75rem; }
@@ -37,152 +43,245 @@ h1 { font-size: 1.85rem; letter-spacing: 0.005em; overflow-wrap: anywhere; }
 h2 { margin: 1.4rem 0 0.65rem; font-size: 1.1rem; letter-spacing: 0.01em; }
 h2:first-child { margin-top: 0; }
 h3 { font-size: 0.95rem; }
-code { padding: 0.1em 0.35em; border-radius: 4px; background: var(--rail); font-size: 0.92em; overflow-wrap: anywhere; }
+code { padding: 0.1em 0.4em; border: 1px solid var(--line-soft); border-radius: 5px; background: var(--rail); font-size: 0.9em; overflow-wrap: anywhere; }
+svg { flex: none; }
 :focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+
+.skip { position: absolute; top: -100px; left: 12px; z-index: 50; padding: 0.5rem 0.8rem; border-radius: var(--r-control); background: var(--amber); color: var(--amber-ink); font-weight: 600; text-decoration: none; }
+.skip:focus { top: 12px; }
 
 /* ── Okvir aplikacije: bočni meni i sadržaj ── */
-.shell { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100vh; }
-.side { position: sticky; top: 0; display: flex; flex-direction: column; height: 100vh; padding: 1.1rem 0.75rem 1rem; background: var(--rail); border-right: 1px solid var(--line-soft); }
-.brand { display: flex; align-items: center; gap: 0.55rem; margin: 0 0.4rem 1.4rem; color: var(--text); font: 600 1.25rem/1 var(--display); font-stretch: 87.5%; letter-spacing: 0.02em; text-decoration: none; }
+.shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+.side { position: sticky; top: 0; display: flex; flex-direction: column; height: 100vh; padding: 1.15rem 0.75rem 1rem; background: var(--rail); border-right: 1px solid var(--line-soft); }
+.brand { display: flex; align-items: center; gap: 0.55rem; margin: 0 0.45rem 1.5rem; color: var(--text); font: 600 1.3rem/1 var(--display); font-stretch: 87.5%; letter-spacing: 0.02em; text-decoration: none; }
 .side-nav { display: flex; flex-direction: column; gap: 2px; }
-.side-label { margin: 0.9rem 0.55rem 0.3rem; color: var(--muted); font-size: 0.78rem; }
+.side-label { margin: 1rem 0.6rem 0.35rem; color: #7f838c; font-size: 0.76rem; font-weight: 600; }
 .side-label:first-child { margin-top: 0; }
-.side-nav a { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.55rem; border-radius: var(--r-control); color: var(--muted); font-weight: 500; text-decoration: none; transition: background 0.12s, color 0.12s; }
+.side-nav a { position: relative; display: flex; align-items: center; gap: 0.65rem; height: 34px; padding: 0 0.6rem; border-radius: var(--r-control); color: var(--muted); font-weight: 500; text-decoration: none; transition: background 0.12s, color 0.12s; }
 .side-nav a:hover { background: var(--panel); color: var(--text); }
-.side-nav a.active { background: var(--raised); color: var(--text); }
+.side-nav a.active { background: var(--raised); color: var(--text); box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%); }
+.side-nav a.active::before { content: ""; position: absolute; left: -0.75rem; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--amber); }
 .side-nav a.active svg { color: var(--amber); }
-.side-nav svg { flex: none; }
-.side-foot { display: flex; gap: 0.9rem; margin: auto 0.55rem 0; font-size: 0.82rem; }
-.side-foot a { color: var(--muted); text-decoration: none; }
+/* Šta se trenutno pravi u pozadini; vidljivo sa svake stranice. */
+.side-activity { display: flex; align-items: center; gap: 0.6rem; margin: auto 0 0.75rem; padding: 0.55rem 0.65rem; border: 1px solid var(--line-soft); border-radius: var(--r-control); background: var(--panel); color: var(--soft); font-size: 0.84rem; line-height: 1.3; text-decoration: none; }
+.side-activity:hover { border-color: var(--line); color: var(--text); }
+.side-activity:not([hidden]) + .side-foot { margin-top: 0; }
+.side-foot { display: flex; gap: 0.9rem; margin: auto 0.6rem 0; font-size: 0.82rem; }
+.side-foot a { color: #7f838c; text-decoration: none; }
 .side-foot a:hover { color: var(--text); }
 
-main { width: 100%; max-width: 1280px; padding: 1.75rem clamp(16px, 3vw, 40px) 4rem; }
+main { width: 100%; max-width: 1280px; padding: 1.9rem clamp(16px, 3vw, 40px) 5rem; }
 
 @media (max-width: 860px) {
   .shell { grid-template-columns: minmax(0, 1fr); }
-  .side { position: static; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; height: auto; padding: 0.6rem 0.75rem; border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .side { position: static; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.75rem; height: auto; padding: 0.6rem 0.75rem; border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .brand { margin: 0 0.5rem 0 0.25rem; }
   .side-nav { flex-direction: row; flex-wrap: wrap; flex: 1; }
-  .side-label, .side-foot { display: none; }
+  .side-nav a.active::before, .side-label, .side-foot { display: none; }
+  .side-activity { margin: 0; }
 }
 
 /* ── Zaglavlje stranice i ploče ── */
-.page-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem 1rem; margin-bottom: 1.25rem; }
-.head-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-.card { margin-bottom: 1rem; padding: 1.15rem 1.25rem; border: 1px solid var(--line-soft); border-radius: var(--r-panel); background: var(--panel); }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 0.9rem 1rem; margin-bottom: 1.4rem; }
+.head-title { min-width: 0; }
+.crumb { display: inline-flex; align-items: center; gap: 0.2rem; margin: 0 0 0.35rem -0.2rem; color: var(--muted); font-size: 0.86rem; font-weight: 500; text-decoration: none; }
+.crumb:hover { color: var(--text); }
+.head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.head-actions form { margin: 0; }
+.card { margin-bottom: 1rem; padding: 1.25rem 1.35rem; border: 1px solid var(--line-soft); border-radius: var(--r-panel); background: var(--panel); box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%); }
 .card.narrow { max-width: 440px; margin: 2rem 0; }
-.form-card { max-width: 560px; }
-.form-source { margin: 0; font-size: 1.05rem; }
-.form-card .meta { margin-bottom: 1.1rem; }
-.grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: 1rem; align-items: start; }
+.form-card { max-width: 580px; }
+.form-source { margin: 0; font: 600 1.15rem/1.25 var(--display); font-stretch: 87.5%; overflow-wrap: anywhere; }
+.form-card .meta { margin-bottom: 1.2rem; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); gap: 1rem; align-items: start; }
 .grid > .card:last-child { position: sticky; top: 1rem; }
 @media (max-width: 1040px) { .grid { grid-template-columns: minmax(0, 1fr); } .grid > .card:last-child { position: static; } }
 
-/* ── Polja i dugmad ── */
-.stack { display: grid; gap: 0.9rem; }
-.stack > h2 { margin-bottom: -0.2rem; }
+/* ── Polja ── */
+.stack { display: grid; gap: 1rem; }
+.stack > h2 { margin: 0.6rem 0 -0.25rem; padding-top: 1rem; border-top: 1px solid var(--line-soft); }
+.stack > h2:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .stack > p { margin: 0; }
-label, .field-label { display: block; margin-bottom: 0.9rem; font-size: 0.88rem; font-weight: 500; }
+label, .field-label { display: block; margin-bottom: 0.9rem; color: var(--soft); font-size: 0.84rem; font-weight: 600; }
 .stack label, .field-label { margin: 0; }
+label .muted { font-weight: 400; }
 :where(input:not([type="checkbox"], [type="radio"], [type="file"], [type="range"], [type="hidden"]), textarea, select) {
-  display: block; width: 100%; margin-top: 0.35rem; padding: 0.5rem 0.65rem;
+  display: block; width: 100%; min-height: 38px; margin-top: 0.4rem; padding: 0.45rem 0.7rem;
   border: 1px solid var(--line); border-radius: var(--r-control);
-  background: var(--rail); color: var(--text); font: inherit; font-weight: 400;
+  background: var(--rail); box-shadow: inset 0 1px 2px rgb(0 0 0 / 35%);
+  color: var(--text); font: 400 0.95rem/1.4 var(--body);
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
-:where(input, textarea, select):hover { border-color: #4b4f58; }
-:where(input, textarea, select):focus-visible { outline: 2px solid var(--sky); outline-offset: 0; border-color: transparent; }
-::placeholder { color: #6f737c; }
-textarea { resize: vertical; }
-input[type="file"] { display: block; margin-top: 0.35rem; color: var(--muted); font: inherit; font-weight: 400; }
-input[type="file"]::file-selector-button { margin-right: 0.75rem; padding: 0.4rem 0.8rem; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--raised); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
-input[type="range"] { display: block; width: 100%; margin: 0.45rem 0 0; accent-color: var(--amber); }
-.check { display: flex; align-items: center; gap: 0.5rem; font-weight: 400; }
-.check input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--amber); }
+:where(input, textarea, select):hover { border-color: #50545d; }
+:where(input:not([type="checkbox"], [type="radio"], [type="range"], [type="file"]), textarea, select):focus-visible { outline: 0; border-color: var(--sky); box-shadow: inset 0 1px 2px rgb(0 0 0 / 35%), var(--ring); }
+:where(input, textarea, select):disabled { opacity: 0.5; cursor: not-allowed; }
+::placeholder { color: #666a73; }
+textarea { min-height: 5.5rem; resize: vertical; }
+select { padding-right: 2.1rem; appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%239da1aa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6.5 8 10l4-3.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.6rem center; background-size: 16px; cursor: pointer; }
+input[type="number"] { font-family: var(--display); font-variant-numeric: tabular-nums; }
 
+/* Kvačica: kvadratić u boji izbora. */
+input[type="checkbox"] { flex: none; width: 18px; height: 18px; margin: 0; appearance: none; border: 1px solid #5a5e68; border-radius: 5px; background: var(--rail); cursor: pointer; transition: background 0.12s, border-color 0.12s; }
+input[type="checkbox"]:hover { border-color: var(--muted); }
+input[type="checkbox"]:checked { border-color: var(--sky); background: var(--sky) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230e1620' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.8 8.4 6.7 11l5.5-6'/%3E%3C/svg%3E") center / 14px no-repeat; }
+input[type="checkbox"]:indeterminate { border-color: var(--sky); background: var(--sky) linear-gradient(#0e1620, #0e1620) center / 9px 2px no-repeat; }
+input[type="checkbox"]:focus-visible { outline: 0; box-shadow: var(--ring); }
+.check { display: flex; align-items: center; gap: 0.6rem; color: var(--text); font-size: 0.92rem; font-weight: 400; cursor: pointer; }
+/* U formama je kvačica prekidač: uključuje ili isključuje jedno podešavanje. */
+.stack .check input[type="checkbox"] { width: 34px; height: 20px; border: 0; border-radius: 999px; background: #4a4e57 radial-gradient(circle at 10px 10px, #f1f2f4 0 7px, transparent 7.5px) no-repeat; transition: background-color 0.15s, background-position 0.15s; }
+.stack .check input[type="checkbox"]:checked { background-color: var(--amber); background-image: radial-gradient(circle at 10px 10px, #1f1500 0 7px, transparent 7.5px); background-position: 14px 0; }
+.stack .check input[type="checkbox"]:disabled { opacity: 0.4; }
+
+/* Klizač: jantarna traka pokazuje koliko je pomjeren (--fill postavlja app.js). */
+input[type="range"] { display: block; width: 100%; height: 20px; margin: 0.35rem 0 0; appearance: none; background: none; cursor: pointer; }
+input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--amber) var(--fill, 0%), var(--line) var(--fill, 0%)); }
+input[type="range"]::-webkit-slider-thumb { width: 16px; height: 16px; margin-top: -6px; appearance: none; border: 2px solid var(--amber); border-radius: 50%; background: #1b1c1f; box-shadow: 0 1px 3px rgb(0 0 0 / 50%); transition: transform 0.1s; }
+input[type="range"]:hover::-webkit-slider-thumb { transform: scale(1.12); }
+input[type="range"]:focus-visible { outline: 0; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--ring); }
+input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--line); }
+input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--amber); }
+input[type="range"]::-moz-range-thumb { width: 13px; height: 13px; border: 2px solid var(--amber); border-radius: 50%; background: #1b1c1f; }
+
+/* Polje za fajl kao zona u koju se fajl može i prevući. */
+.drop { position: relative; display: grid; justify-items: center; gap: 0.3rem; margin: 0; padding: 1.4rem 1rem; border: 1px dashed #555963; border-radius: var(--r-panel); background: var(--rail); color: var(--muted); font-size: 0.9rem; font-weight: 400; text-align: center; cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+.drop:hover, .drop.is-over { border-color: var(--sky); background: color-mix(in srgb, var(--sky) 6%, var(--rail)); }
+.drop:focus-within { border-color: var(--sky); box-shadow: var(--ring); }
+.drop strong { color: var(--text); font-weight: 600; }
+.drop svg { width: 22px; height: 22px; margin-bottom: 0.2rem; color: var(--soft); }
+.drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.drop.has-file { border-style: solid; border-color: var(--ok); }
+input[type="file"] { color: var(--muted); font: inherit; }
+
+/* ── Dugmad ── */
 button, .button {
-  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
-  padding: 0.45rem 0.85rem; border: 1px solid var(--line); border-radius: var(--r-control);
-  background: var(--raised); color: var(--text);
-  font: 600 0.92rem/1.3 var(--display); font-stretch: 92%; letter-spacing: 0.01em;
-  text-decoration: none; white-space: nowrap; cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+  height: var(--control-h); padding: 0 0.9rem;
+  border: 1px solid var(--line); border-radius: var(--r-control);
+  background: linear-gradient(var(--raised-hi), var(--raised));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 1px 1px rgb(0 0 0 / 28%);
+  color: var(--text);
+  font: 600 0.92rem/1 var(--display); font-stretch: 92%; letter-spacing: 0.01em;
+  text-decoration: none; white-space: nowrap; cursor: pointer; user-select: none;
+  transition: background 0.12s, border-color 0.12s, transform 0.06s, box-shadow 0.12s;
 }
-button:hover, .button:hover { border-color: #565a64; background: #363a40; }
-.primary { border-color: var(--amber); background: var(--amber); color: var(--amber-ink); }
-.primary:hover { border-color: #ffc35c; background: #ffc35c; }
-.big { width: 100%; padding: 0.7rem; font-size: 1rem; }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
+button:hover, .button:hover { border-color: #5a5e68; background: linear-gradient(#40444b, #353940); }
+button:active, .button:active { transform: translateY(1px); box-shadow: inset 0 1px 2px rgb(0 0 0 / 35%); }
+button:focus-visible, .button:focus-visible { outline: 0; box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), var(--ring); border-color: var(--sky); }
+.primary { border-color: #ffc45f; background: linear-gradient(#ffbf4d, #ffa91f); box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%), 0 1px 2px rgb(0 0 0 / 35%); color: var(--amber-ink); }
+.primary:hover { border-color: #ffd58a; background: linear-gradient(#ffcb6e, #ffb53c); }
+.danger { border-color: #ff8f8f; background: linear-gradient(#ff7d7d, #f85d5d); box-shadow: inset 0 1px 0 rgb(255 255 255 / 28%), 0 1px 2px rgb(0 0 0 / 35%); color: #2a0606; }
+.danger:hover { border-color: #ffb0b0; background: linear-gradient(#ff9393, #fa6f6f); }
 .danger-outline { color: var(--bad); }
-.danger-outline:hover { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, var(--raised)); }
-button.link { padding: 0; border: 0; background: none; color: var(--sky); font: 500 0.88rem var(--body); }
+.danger-outline:hover { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, var(--raised)); }
+.big { width: 100%; height: 44px; font-size: 1.02rem; }
+.icon-only { width: var(--control-h); padding: 0; }
+button:disabled, .button[aria-disabled="true"] { opacity: 0.42; cursor: not-allowed; transform: none; }
+button.link { height: auto; padding: 0; border: 0; background: none; box-shadow: none; color: var(--sky); font: 500 0.88rem var(--body); }
 button.link:hover { background: none; text-decoration: underline; }
+/* Dugme čeka odgovor: tekst ostaje, a ispred njega se vrti krug. */
+.is-loading { pointer-events: none; opacity: 0.85; }
+.is-loading::before, .spinner { content: ""; flex: none; width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; }
+.is-loading > svg { display: none; }
+.spinner { display: inline-block; color: var(--amber); }
+@keyframes spin { to { transform: rotate(360deg); } }
 .row { display: flex; align-items: flex-end; gap: 0.5rem; }
-.row label { flex: 1; }
+.row label { flex: 1; min-width: 0; }
+.row > input, .row > .grow { flex: 1; min-width: 0; }
+.row > button { height: 38px; }
+
+/* Grupa povezanih dugmadi: udubljena podloga, izabrano dugme je izdignuto. */
+.tl-group { display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--rail); }
+.tl-group button { height: 28px; padding: 0 0.7rem; border-color: transparent; border-radius: 7px; background: none; box-shadow: none; color: var(--soft); font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+.tl-group button:hover { background: var(--raised); color: var(--text); }
+.tl-group button.is-picked { border-color: var(--line); background: linear-gradient(var(--raised-hi), var(--raised)); box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 1px 1px rgb(0 0 0 / 30%); color: var(--sky); }
+.tl-group button:disabled { opacity: 0.35; }
+
+/* Meni sa dodatnim akcijama (tri tačke). */
+.menu { position: relative; }
+.menu > summary { list-style: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu[open] > summary { border-color: var(--sky); }
+.menu-list { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; display: grid; min-width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); box-shadow: var(--shadow-pop); animation: pop 0.12s ease-out; }
+.menu.drop-down .menu-list { top: calc(100% + 6px); bottom: auto; }
+.menu-list form { margin: 0; }
+.menu-list a, .menu-list button { display: flex; justify-content: flex-start; gap: 0.6rem; width: 100%; height: 34px; padding: 0 0.6rem; border: 0; border-radius: 6px; background: none; box-shadow: none; color: var(--text); font: 500 0.92rem var(--body); letter-spacing: 0; text-decoration: none; }
+.menu-list a:hover, .menu-list button:hover { background: var(--raised-hi); }
+.menu-list .danger-outline { color: var(--bad); }
+.menu-list .danger-outline:hover { background: color-mix(in srgb, var(--bad) 16%, var(--raised)); }
+.menu-list hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--line); }
+@keyframes pop { from { opacity: 0; transform: translateY(4px); } }
 
 /* ── Tekst, poruke i stanja ── */
 .muted { color: var(--muted); font-weight: 400; }
 .small { margin: 0.15rem 0 0; font-size: 0.85rem; }
 .error { color: var(--bad); }
 p.error { padding: 0.6rem 0.8rem; border-radius: var(--r-control); background: color-mix(in srgb, var(--bad) 12%, transparent); }
-.meta { display: flex; flex-wrap: wrap; gap: 0.1rem 0.9rem; margin: 0.25rem 0 0; color: var(--muted); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.15rem 0.9rem; margin: 0.3rem 0 0; color: var(--muted); font-size: 0.84rem; font-variant-numeric: tabular-nums; }
 .folder-hint { max-width: 78ch; margin: 1.25rem 0 0; color: var(--muted); font-size: 0.86rem; }
 
-.flash { margin-bottom: 1.1rem; padding: 0.65rem 0.9rem; border-left: 3px solid var(--ok); border-radius: var(--r-control); background: color-mix(in srgb, var(--ok) 10%, var(--panel)); font-weight: 500; }
-.flash.bad { border-left-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--panel)); }
-.notice { margin: 0 0 1rem; padding: 0.75rem 0.95rem; border-left: 3px solid var(--sky); border-radius: var(--r-control); background: color-mix(in srgb, var(--sky) 8%, var(--panel)); font-size: 0.9rem; }
-.notice p { margin: 0.25rem 0; }
-.notice.warn { border-left-color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--panel)); }
-.notice.warn strong { color: var(--amber); }
-.empty { padding: 2.75rem 1rem; border: 1px dashed var(--line); border-radius: var(--r-panel); color: var(--muted); text-align: center; }
-.empty .button { margin-left: 0.5rem; }
+/* Poruka nakon akcije: iskače u uglu i sama nestaje. */
+.toasts { position: fixed; right: 20px; bottom: 20px; z-index: 40; display: grid; gap: 0.5rem; width: min(420px, calc(100vw - 40px)); }
+.toast { display: flex; align-items: flex-start; gap: 0.7rem; padding: 0.75rem 0.6rem 0.75rem 0.9rem; border: 1px solid var(--line); border-left: 3px solid var(--ok); border-radius: var(--r-control); background: var(--raised); box-shadow: var(--shadow-pop); font-weight: 500; animation: toast-in 0.2s ease-out; }
+.toast.bad { border-left-color: var(--bad); }
+.toast p { flex: 1; margin: 0; }
+.toast button { width: 26px; height: 26px; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); }
+.toast button:hover { background: var(--raised-hi); color: var(--text); }
+.toast.is-leaving { opacity: 0; transform: translateY(6px); transition: opacity 0.2s, transform 0.2s; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(10px); } }
 
-.chip { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+.notice { margin: 0 0 1rem; padding: 0.75rem 0.95rem; border: 1px solid var(--line-soft); border-left: 3px solid var(--sky); border-radius: var(--r-control); background: color-mix(in srgb, var(--sky) 7%, var(--panel)); font-size: 0.9rem; }
+.notice p { margin: 0.25rem 0; }
+.notice.warn { border-left-color: var(--amber); background: color-mix(in srgb, var(--amber) 7%, var(--panel)); }
+.notice.warn strong { color: var(--amber); }
+/* Prazna lista: šta ovdje nastaje i čime se počinje. */
+.empty { display: grid; justify-items: center; gap: 0.35rem; padding: 3rem 1.25rem; border: 1px dashed var(--line); border-radius: var(--r-panel); color: var(--muted); text-align: center; }
+.empty > svg { width: 28px; height: 28px; margin-bottom: 0.4rem; color: #6f737c; }
+.empty strong { color: var(--text); font: 600 1.15rem var(--display); font-stretch: 87.5%; }
+.empty p { max-width: 46ch; margin: 0; }
+.empty .button, .empty form { margin-top: 0.8rem; }
+
+.chip { display: inline-flex; align-items: center; height: 20px; padding: 0 0.55rem; border-radius: 999px; background: var(--raised); color: var(--muted); font-size: 0.76rem; font-weight: 600; white-space: nowrap; }
 .chip.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
 .chip.warn { background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
 .chip.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
 .chip.info { background: color-mix(in srgb, var(--sky) 16%, transparent); color: var(--sky); }
 
-.progress { position: relative; height: 24px; margin-bottom: 1rem; overflow: hidden; border-radius: var(--r-control); background: var(--rail); }
-.progress .bar { position: absolute; inset: 0 auto 0 0; width: 0; background: color-mix(in srgb, var(--sky) 45%, transparent); transition: width 0.3s; }
-.progress .label { position: relative; display: block; font: 600 0.8rem/24px var(--display); font-variant-numeric: tabular-nums; text-align: center; }
-.progress.small { height: 18px; max-width: 320px; margin: 0.35rem 0 0; }
-.progress.small .label { font-size: 0.74rem; line-height: 18px; }
+.progress { position: relative; height: 22px; margin-bottom: 1rem; overflow: hidden; border-radius: 6px; background: var(--rail); box-shadow: inset 0 1px 2px rgb(0 0 0 / 40%); }
+.progress .bar { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 6px; background: linear-gradient(90deg, color-mix(in srgb, var(--sky) 55%, transparent), color-mix(in srgb, var(--sky) 80%, transparent)); transition: width 0.3s; }
+.progress .label { position: relative; display: block; font: 600 0.78rem/22px var(--display); font-variant-numeric: tabular-nums; text-align: center; text-shadow: 0 1px 2px rgb(0 0 0 / 60%); }
+.progress.small { height: 16px; max-width: 320px; margin: 0.35rem 0 0; }
+.progress.small .label { font-size: 0.72rem; line-height: 16px; }
 
 .player { display: block; width: 100%; max-height: 62vh; margin-bottom: 0.9rem; border-radius: var(--r-media); background: #000; }
 
 /* ── Snimci ── */
 .recs { display: grid; gap: 0.6rem; margin: 0; padding: 0; list-style: none; }
-.rec { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 1.1rem; padding: 0.8rem; border: 1px solid var(--line-soft); border-radius: var(--r-panel); background: var(--panel); transition: border-color 0.12s; }
-.rec:hover { border-color: var(--line); }
+.rec { display: grid; grid-template-columns: 224px minmax(0, 1fr); gap: 1.15rem; padding: 0.8rem; border: 1px solid var(--line-soft); border-radius: var(--r-panel); background: var(--panel); box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%); transition: border-color 0.12s, background 0.12s; }
+.rec:hover { border-color: var(--line); background: #272a2e; }
 .rec-thumb { position: relative; display: block; aspect-ratio: 16 / 9; align-self: start; overflow: hidden; border-radius: var(--r-media); background: #000; }
 .rec-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
-.rec-len, .short-len { position: absolute; right: 6px; bottom: 6px; padding: 0.1rem 0.4rem; border-radius: 4px; background: rgb(0 0 0 / 78%); color: #fff; font: 600 0.8rem/1.3 var(--display); font-variant-numeric: tabular-nums; }
+.rec-len, .short-len { position: absolute; right: 6px; bottom: 6px; padding: 0.1rem 0.4rem; border-radius: 5px; background: rgb(0 0 0 / 78%); color: #fff; font: 600 0.8rem/1.3 var(--display); font-variant-numeric: tabular-nums; }
 .rec-body { display: flex; flex-direction: column; min-width: 0; }
 .rec-head { display: flex; align-items: flex-start; gap: 0.75rem; }
 .rec-head form { margin: 0; }
-.rec-head button { padding: 0.3rem 0.65rem; font-size: 0.85rem; }
-.rec-title { flex: 1; min-width: 0; color: var(--text); font: 600 1.15rem/1.25 var(--display); font-stretch: 87.5%; text-decoration: none; overflow-wrap: anywhere; }
+.rec-head button { height: 30px; padding: 0 0.65rem; font-size: 0.85rem; }
+.rec-title { flex: 1; min-width: 0; color: var(--text); font: 600 1.18rem/1.25 var(--display); font-stretch: 87.5%; text-decoration: none; overflow-wrap: anywhere; }
 .rec-title:hover { color: var(--amber); }
 .rec .meta { margin-bottom: 0.75rem; }
 .rec .tl { margin-top: auto; }
 @media (max-width: 640px) { .rec { grid-template-columns: minmax(0, 1fr); } }
 
 /* ── Vremenska traka: udubljena traka sa stubićima glasnoće (jantarna = zvuk) ── */
-.tl { position: relative; height: 46px; overflow: hidden; border: 1px solid #0c0d0e; border-radius: var(--r-control); background: var(--rail); }
+.tl { position: relative; height: 46px; overflow: hidden; border: 1px solid #0c0d0e; border-radius: var(--r-control); background: var(--rail); box-shadow: inset 0 2px 4px rgb(0 0 0 / 40%); }
 .tl-wave { position: absolute; inset: 0; width: 100%; height: 100%; fill: var(--amber); opacity: 0.38; }
-.tl-mark { position: absolute; top: 0; bottom: 0; min-width: 5px; padding: 0; border: 0; border-top: 3px solid var(--amber); border-radius: 0; background: color-mix(in srgb, var(--amber) 24%, transparent); }
-.tl-mark:hover { background: color-mix(in srgb, var(--amber) 24%, transparent); }
+.tl-mark { position: absolute; top: 0; bottom: 0; min-width: 5px; height: auto; padding: 0; border: 0; border-top: 3px solid var(--amber); border-radius: 0; background: color-mix(in srgb, var(--amber) 24%, transparent); box-shadow: none; }
+.tl-mark:hover, .tl-mark:active { border-color: var(--amber); background: color-mix(in srgb, var(--amber) 24%, transparent); transform: none; }
 .tl-made { position: absolute; bottom: 0; height: 4px; min-width: 5px; background: var(--ok); }
 
-.tl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-bottom: 0.6rem; }
-.tl-tools > button { padding: 0.35rem 0.7rem; }
-.tl-group { display: flex; }
-.tl-group button { margin-left: -1px; padding: 0.35rem 0.7rem; border-radius: 0; font-variant-numeric: tabular-nums; }
-.tl-group button:first-child { margin-left: 0; border-radius: var(--r-control) 0 0 var(--r-control); }
-.tl-group button:last-child { border-radius: 0 var(--r-control) var(--r-control) 0; }
-.tl-group button:hover, .tl-group button.is-picked { position: relative; }
-.tl-tools button.is-picked, .moment.is-picked { border-color: var(--sky); background: color-mix(in srgb, var(--sky) 16%, var(--raised)); color: var(--sky); }
+.tl-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-bottom: 0.7rem; }
+.tl-tools > button { height: 34px; }
 .tl-zoom { margin-left: auto; }
 .tl-scroll { overflow-x: auto; overflow-y: hidden; border-radius: var(--r-control); scrollbar-width: thin; }
 .tl-inner { min-width: 100%; }
@@ -190,7 +289,7 @@ p.error { padding: 0.6rem 0.8rem; border-radius: var(--r-control); background: c
 .tl-live { height: 112px; cursor: crosshair; touch-action: none; user-select: none; }
 .tl-live .tl-wave { opacity: 0.5; }
 .tl-live .tl-mark { cursor: pointer; }
-.tl-live .tl-mark:hover, .tl-live .tl-mark:focus-visible { background: color-mix(in srgb, var(--amber) 45%, transparent); outline: 0; }
+.tl-live .tl-mark:hover, .tl-live .tl-mark:focus-visible { background: color-mix(in srgb, var(--amber) 45%, transparent); outline: 0; box-shadow: none; }
 /* Izbor je plav, da se razlikuje od jantarnih prijedloga ispod njega. */
 .tl-selection { position: absolute; top: 0; bottom: 0; min-width: 4px; border: 2px solid var(--sky); border-radius: 4px; background: color-mix(in srgb, var(--sky) 20%, transparent); cursor: grab; }
 .tl-selection:active { cursor: grabbing; }
@@ -206,70 +305,66 @@ p.error { padding: 0.6rem 0.8rem; border-radius: var(--r-control); background: c
 .tl-scale.is-drawn { position: relative; display: block; height: 1.4em; }
 .tl-scale.is-drawn span { position: absolute; padding-left: 4px; border-left: 1px solid var(--line); }
 .moments { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.6rem 0 0; padding: 0; list-style: none; }
-.moment { padding: 0.3rem 0.65rem; font-variant-numeric: tabular-nums; }
+.moment { height: 30px; padding: 0 0.7rem; font-size: 0.88rem; font-variant-numeric: tabular-nums; }
+.moment.is-picked { border-color: var(--sky); background: color-mix(in srgb, var(--sky) 16%, var(--raised)); color: var(--sky); }
 
-.queue-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 1rem; padding: 0.55rem 0.6rem 0.55rem 0.9rem; border-left: 3px solid var(--sky); border-radius: var(--r-control); background: color-mix(in srgb, var(--sky) 8%, var(--panel)); }
+/* Traka dok se Shorts prave */
+.queue-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem 1rem; margin-bottom: 1rem; padding: 0.5rem 0.55rem 0.5rem 0.9rem; border: 1px solid var(--line-soft); border-left: 3px solid var(--sky); border-radius: var(--r-control); background: color-mix(in srgb, var(--sky) 7%, var(--panel)); }
+.queue-bar > span { display: inline-flex; align-items: center; gap: 0.6rem; }
 .queue-bar form { margin: 0; }
-.queue-bar button { padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+.queue-bar button { height: 30px; padding: 0 0.7rem; font-size: 0.85rem; }
 
 /* Označavanje više Shortsa */
-.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; margin: 0 0 1rem; }
+.bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1rem; min-height: 32px; margin: 0 0 1rem; }
 .bulk-bar .check { margin: 0; font-weight: 500; }
-.bulk-bar button { margin-left: auto; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
-.short { position: relative; }
-.pick { position: absolute; top: 8px; left: 8px; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; margin: 0; border-radius: var(--r-control); background: rgb(0 0 0 / 55%); cursor: pointer; }
-.pick input { width: 16px; height: 16px; margin: 0; accent-color: var(--sky); cursor: pointer; }
+.bulk-bar button { height: 30px; margin-left: auto; padding: 0 0.7rem; font-size: 0.85rem; }
+.pick { position: absolute; top: 8px; left: 8px; z-index: 1; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; border-radius: var(--r-control); background: rgb(0 0 0 / 55%); cursor: pointer; transition: background 0.12s; }
+.pick:hover { background: rgb(0 0 0 / 75%); }
 .short.is-selected .short-frame { outline-color: var(--sky); }
 
-/* Prozor za potvrdu */
-.confirm { width: min(420px, calc(100vw - 2rem)); padding: 1.25rem 1.35rem 1.1rem; border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--panel); color: var(--text); box-shadow: 0 24px 60px rgb(0 0 0 / 55%); }
-.confirm::backdrop { background: rgb(10 11 12 / 62%); backdrop-filter: blur(2px); }
-.confirm h2 { margin: 0 0 0.5rem; font-size: 1.25rem; overflow-wrap: anywhere; }
-.confirm p { margin: 0; color: var(--muted); }
-.confirm p:empty { display: none; }
-.confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem; }
-.danger { border-color: var(--bad); background: var(--bad); color: #2a0606; }
-.danger:hover { border-color: #ff8a8a; background: #ff8a8a; }
-
 /* ── Pločice: Shorts (9:16), thumbnailovi i videi (16:9) ── */
-.shorts { display: grid; grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 1.6rem 1rem; margin: 0; padding: 0; list-style: none; }
-.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1.6rem 1rem; margin: 0; padding: 0; list-style: none; }
-.short, .thumb { display: flex; flex-direction: column; min-width: 0; }
+.shorts { display: grid; grid-template-columns: repeat(auto-fill, minmax(204px, 1fr)); gap: 1.7rem 1rem; margin: 0; padding: 0; list-style: none; }
+.thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(264px, 1fr)); gap: 1.7rem 1rem; margin: 0; padding: 0; list-style: none; }
+.short, .thumb { position: relative; display: flex; flex-direction: column; min-width: 0; }
 .short-frame, .thumb-frame { position: relative; display: block; overflow: hidden; background: #000; outline: 2px solid transparent; outline-offset: 2px; transition: outline-color 0.12s; }
 .short-frame { aspect-ratio: 9 / 16; border-radius: 12px; }
 .thumb-frame { aspect-ratio: 16 / 9; border-radius: var(--r-media); }
-a.short-frame:hover, a.thumb-frame:hover { outline-color: var(--sky); }
+a.short-frame:hover, a.thumb-frame:hover, a.short-frame:focus-visible, a.thumb-frame:focus-visible { outline-color: var(--sky); }
 .short-frame video, .thumb-frame img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .thumb-frame img.fit { object-fit: contain; }
-.short-frame.is-busy, .short-frame.is-failed, .thumb-frame.is-busy, .thumb-frame.is-failed { display: grid; place-content: center; justify-items: center; gap: 0.5rem; padding: 1rem; border: 1px dashed var(--line); background: var(--panel); color: var(--muted); font-size: 0.88rem; text-align: center; }
+.short-frame.is-busy, .short-frame.is-failed, .thumb-frame.is-busy, .thumb-frame.is-failed { display: grid; place-content: center; justify-items: center; gap: 0.55rem; padding: 1rem; border: 1px dashed var(--line); background: var(--panel); color: var(--muted); font-size: 0.88rem; text-align: center; }
 .short-frame.is-failed, .thumb-frame.is-failed { color: var(--bad); overflow-wrap: anywhere; }
 .short-frame p, .thumb-frame p { margin: 0; }
-.short-frame .progress, .thumb-frame .progress { width: 120px; margin: 0; }
-.short-title { margin-top: 0.65rem; font: 600 1.02rem/1.25 var(--display); font-stretch: 87.5%; overflow-wrap: anywhere; }
-.short-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.65rem; }
+.short-frame .progress, .thumb-frame .progress { width: 124px; margin: 0; }
+.short-title { margin-top: 0.7rem; font: 600 1.04rem/1.25 var(--display); font-stretch: 87.5%; overflow-wrap: anywhere; }
+.short-actions { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.7rem; }
 .short-actions form { margin: 0; }
-.short-actions form:last-child { margin-left: auto; }
-.short-actions button, .short-actions .button { padding: 0.3rem 0.65rem; font-size: 0.85rem; }
-.short-actions .danger-outline { border-color: transparent; background: none; }
-.short-actions .danger-outline:hover { border-color: var(--bad); }
+.short-actions button, .short-actions .button { height: 32px; padding: 0 0.7rem; font-size: 0.86rem; }
+.short-actions .icon-only { width: 32px; padding: 0; }
+.short-actions .menu { margin-left: auto; }
+.short-actions > form:last-child:not(:first-child) { margin-left: auto; }
+.short-actions > form > .danger-outline { border-color: transparent; background: none; box-shadow: none; }
+.short-actions > form > .danger-outline:hover { border-color: var(--bad); }
 
 /* ── Editor thumbnaila ── */
 .thumb-canvas { display: block; width: 100%; height: auto; margin-bottom: 0.6rem; border-radius: var(--r-media); background: #000; cursor: move; touch-action: none; }
 .thumb-source { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-#thumb-time { margin: 0.5rem 0; }
-.swatches { display: flex; gap: 0.5rem; margin-top: 0.45rem; }
-.swatch { width: 1.9rem; height: 1.9rem; padding: 0; border: 2px solid var(--line); border-radius: 50%; }
-.swatch:hover { border-color: var(--text); }
-.swatch.is-picked { outline: 2px solid var(--sky); outline-offset: 2px; }
+#thumb-time { margin: 0.6rem 0; }
+.swatches { display: flex; gap: 0.55rem; margin-top: 0.5rem; }
+.swatch { width: 30px; height: 30px; padding: 0; border: 2px solid rgb(255 255 255 / 18%); border-radius: 50%; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 25%); }
+.swatch:hover { border-color: rgb(255 255 255 / 60%); transform: scale(1.06); }
+.swatch:active { transform: scale(0.96); }
+.swatch.is-picked { outline: 2px solid var(--sky); outline-offset: 3px; border-color: #fff; }
 
 /* ── Spajanje videa ── */
-.pick-group { margin: 1.1rem 0 0.3rem; color: var(--muted); font-size: 0.86rem; }
+.pick-group { margin: 1.1rem 0 0.3rem; color: var(--muted); font-size: 0.84rem; }
 .pick-list, .merge-list { margin: 0; padding: 0; list-style: none; }
-.pick-list li, .merge-list li { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0; border-top: 1px solid var(--line-soft); }
+.pick-list li, .merge-list li { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.5rem; border-radius: var(--r-control); border-top: 1px solid var(--line-soft); }
 .pick-list li:first-child, .merge-list li:first-child { border-top: 0; }
+.pick-list li:hover, .merge-list li:hover { background: #292c31; }
 .pick-list .grow, .merge-list .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .pick-list .meta, .merge-list .meta { margin-top: 0; }
-.pick-list button, .merge-list button { padding: 0.3rem 0.65rem; font-size: 0.85rem; }
+.pick-list button, .merge-list > li > button { height: 30px; padding: 0 0.7rem; font-size: 0.85rem; }
 .merge-list { counter-reset: part; }
 .merge-list li::before { counter-increment: part; content: counter(part); flex: none; width: 1.5rem; color: var(--amber); font: 600 1rem var(--display); font-variant-numeric: tabular-nums; text-align: right; }
 
@@ -283,13 +378,13 @@ a.short-frame:hover, a.thumb-frame:hover { outline-color: var(--sky); }
 .cap-overlay[data-position="middle"] { top: 50%; transform: translateY(-50%); }
 .cap-overlay[data-position="top"] { top: 10%; }
 .cap-style { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
-#cap-lines { display: grid; gap: 0.3rem; max-height: 52vh; margin: 0; padding: 0 0.3rem 0 0; overflow: auto; list-style: none; scrollbar-width: thin; }
-#cap-lines li { display: grid; grid-template-columns: 5rem 5rem minmax(0, 1fr) auto; gap: 0.3rem; align-items: center; }
-#cap-lines input { margin-top: 0; padding: 0.38rem 0.5rem; font-variant-numeric: tabular-nums; }
-#cap-lines input[type="number"] { color: var(--muted); font-family: var(--display); }
+#cap-lines { display: grid; gap: 0.3rem; max-height: 52vh; margin: 0; padding: 2px 0.3rem 2px 2px; overflow: auto; list-style: none; scrollbar-width: thin; }
+#cap-lines li { display: grid; grid-template-columns: 5.2rem 5.2rem minmax(0, 1fr) auto; gap: 0.3rem; align-items: center; }
+#cap-lines input { min-height: 34px; margin-top: 0; padding: 0.3rem 0.5rem; font-variant-numeric: tabular-nums; }
+#cap-lines input[type="number"] { color: var(--muted); }
 #cap-lines li:focus-within input[type="number"] { color: var(--text); }
-#cap-lines button { padding: 0.25rem 0.6rem; border-color: transparent; background: none; }
-#cap-lines button:hover { border-color: var(--bad); }
+#cap-lines button { width: 30px; height: 30px; padding: 0; border-color: transparent; background: none; box-shadow: none; }
+#cap-lines button:hover { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
 .cap-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 
 /* ── Paket za objavu ── */
@@ -303,6 +398,15 @@ a.short-frame:hover, a.thumb-frame:hover { outline-color: var(--sky); }
 .kit-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .kit-thumb:has(input:checked) { outline: 2px solid var(--sky); outline-offset: 1px; border-color: transparent; color: var(--text); }
 .kit-thumb:has(input:focus-visible) { outline: 2px solid #fff; outline-offset: 1px; }
+
+/* ── Prozor za potvrdu ── */
+.confirm { width: min(430px, calc(100vw - 2rem)); padding: 1.35rem 1.4rem 1.15rem; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-pop), inset 0 1px 0 rgb(255 255 255 / 5%); }
+.confirm[open] { animation: pop 0.14s ease-out; }
+.confirm::backdrop { background: rgb(10 11 12 / 66%); backdrop-filter: blur(2px); }
+.confirm h2 { margin: 0 0 0.5rem; font-size: 1.3rem; overflow-wrap: anywhere; }
+.confirm p { margin: 0; color: var(--muted); }
+.confirm p:empty { display: none; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.35rem; }
 
 /* ── Tekstualne stranice ── */
 .prose { max-width: 720px; }
