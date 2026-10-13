@@ -54,6 +54,39 @@ document.addEventListener('submit', (e) => {
   confirmDialog.querySelector('button[value="cancel"]').focus(); // sigurniji izbor je unaprijed označen
 });
 
+// ── Tabovi: dijelovi jedne stranice; izabrani se pamti u adresi (#ime) ──
+for (const bar of document.querySelectorAll('[data-tabs]')) {
+  const tabs = [...bar.querySelectorAll('[data-tab]')];
+  const names = tabs.map((t) => t.dataset.tab);
+  const show = (name, remember) => {
+    for (const tab of tabs) tab.setAttribute('aria-selected', String(tab.dataset.tab === name));
+    for (const n of names) {
+      const panel = document.querySelector(`[data-panel="${n}"]`);
+      if (!panel) continue;
+      panel.hidden = n !== name;
+      if (n !== name) for (const media of panel.querySelectorAll('video')) media.pause();
+    }
+    if (remember) history.replaceState(null, '', `${location.pathname}${location.search}#${name}`);
+  };
+  const asked = location.hash.slice(1);
+  show(names.includes(asked) ? asked : bar.dataset.default || names[0], false);
+  window.addEventListener('hashchange', () => {
+    if (names.includes(location.hash.slice(1))) show(location.hash.slice(1), false);
+  });
+  bar.addEventListener('click', (e) => {
+    const tab = e.target.closest('[data-tab]');
+    if (tab) show(tab.dataset.tab, true);
+  });
+  // Dugme u sadržaju koje vodi na drugi tab, npr. iz prazne liste.
+  document.addEventListener('click', (e) => {
+    const go = e.target.closest('[data-tab-go]');
+    if (go && names.includes(go.dataset.tabGo)) {
+      show(go.dataset.tabGo, true);
+      bar.scrollIntoView({ block: 'nearest' });
+    }
+  });
+}
+
 // ── Označavanje više Shortsa za brisanje ──────────────────
 function updateBulk() {
   const form = document.getElementById('bulk-form');
@@ -66,7 +99,8 @@ function updateBulk() {
   all.indeterminate = picked > 0 && picked < boxes.length;
   document.getElementById('bulk-count').textContent = picked ? `${picked} selected` : 'None selected';
   document.getElementById('bulk-delete').disabled = !picked;
-  form.dataset.confirm = `Delete ${picked} ${picked === 1 ? 'Short' : 'Shorts'}? The video ${picked === 1 ? 'file is' : 'files are'} deleted too, and any that are still being created are cancelled.`;
+  const noun = form.dataset.noun || 'Short';
+  form.dataset.confirm = `Delete ${picked} ${picked === 1 ? noun : `${noun}s`}? The video ${picked === 1 ? 'file is' : 'files are'} deleted too, and any that are still being created are cancelled.`;
 }
 document.addEventListener('change', (e) => {
   if (e.target.id === 'bulk-all') {

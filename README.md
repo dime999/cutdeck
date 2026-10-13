@@ -141,6 +141,8 @@ Sekcija **Clipping** je odvojena od ostatka aplikacije i služi za kampanje u ko
 
 **Izmjena gotovog klipa.** Na stranici klipa otvori **Edit this clip**: možeš pomjeriti početak i kraj, promijeniti ili obrisati hook, promijeniti raspored i ispraviti riječi u titlovima (prazan red se briše). **Save and create again** pravi klip iznova u isti fajl; opis i evidencija objava ostaju. Ako promijeniš rez, titlovi se uzimaju iznova iz transkripta, pa ispravke riječi radi nakon reza.
 
+Stranica kampanje ima četiri taba: **Clips** (gotovi klipovi), **Find scenes** (prijedlozi), **Cut by hand** (player, transkript i ručni rez) i **Rules** (pravila). Za brisanje više klipova odjednom označi kvačice na pločicama (ili **Select all**) i klikni **Delete selected**. Kampanju brišeš dugmetom **Delete campaign** u zaglavlju ili dugmetom **Delete** na njenoj kartici.
+
 Za drugačiji rez iste scene klikni **Make a variation** na klipu: forma se otvori s istim početkom i krajem, pa promijeni hook ili raspored.
 
 Aplikacija ne može provjeriti da li je snimak iz prave epizode, da li je klip prijavljen i u drugu kampanju, ni ko ti gleda videe. **Split into Shorts** ne koristi za kampanje: niz PART 1, PART 2… je isto što i objava cijele epizode, što kampanje zabranjuju.

@@ -319,6 +319,7 @@ Nakon premotavanja preglednik javi `seeked` prije nego što je kadar dostupan za
 | `POST /clipping/:id/transcribe`, `POST /clipping/:id/clips` | Transkript epizode, novi klip |
 | `GET`, `POST /clipping/:id/suggest`, `POST /clipping/:id/cancel` | Pregled predloženih scena, klipovi iz označenih, prekid nedovršenih |
 | `POST /clipping/clips/:id/edit` | Izmjena gotovog klipa i ponovno pravljenje |
+| `POST /clipping/:id/clips/delete` | Brisanje označenih klipova kampanje |
 | `GET`, `POST /clipping/clips/:id`, `POST /clipping/clips/:id/delete` | Provjera pravila, tekst i evidencija objava; brisanje klipa |
 | `GET …/file`, `GET …/thumb` | Video i slike, uz podršku za Range |
 | `GET /api/studio/status` | Stanje poslova za osvježavanje stranica (`?campaign=N` za klipove kampanje, `?all=1` za bočni meni) |
@@ -326,24 +327,21 @@ Nakon premotavanja preglednik javi `seeked` prije nego što je kadar dostupan za
 
 ## 10. Izgled
 
-Uzor su alati za video (DaVinci Resolve, CapCut, Frame.io). Ideja je radni sto za montažu: interfejs je tih, a najsvjetlija stvar na ekranu je video.
+Treći izgled aplikacije ("tamni studio"). Prethodni (grafitna podloga, jantarna dugmad s reljefom, zbijeno pismo Bahnschrift) korisniku se nije svidio: dugmad i polja su djelovali staro, a akcije su bile skrivene.
 
-- **Podloga:** neutralna grafitna siva (`--deck`, `--panel`, `--raised`), jer ne mijenja utisak boja u videu.
-- **Jantarna** (`--amber`) znači zvuk i glavnu akciju: stubići glasnoće, prijedlozi, glavno dugme.
-- **Plava** (`--sky`) znači korisnikov izbor: označeni dio trake, izabrana opcija, fokus.
-- **Pismo:** Bahnschrift za naslove, dugmad i vremena; Segoe UI za tekst. Oba dolaze s Windowsom, pa nema vanjskih fontova.
-- **Raspored:** bočni meni s grupama Library, Create, Assets, Clipping; na uskom ekranu se sklapa u traku na vrhu.
-- Samo tamna tema.
-- Potvrda prije brisanja je prozor u stilu aplikacije (`<dialog>`). Tekst dolazi iz atributa `data-confirm`: dio do prvog upitnika je naslov, ostatak objašnjenje.
-
-Kontrole su oblikovane kao dugmad na uređaju (blagi sjaj odozgo, sjena ispod, pomak pri pritisku) i imaju ista pravila na svim stranicama:
-
-- **Dugmad:** glavna akcija je jantarna, ostale sive, brisanje crveno. Nakon klika dugme pokazuje da je zahtjev poslan i ne prima drugi klik.
-- **Polja:** udubljena, s plavim okvirom u fokusu. Kvačice u formama su prekidači, a klizači pokazuju vrijednost obojenim dijelom trake (`--fill` postavlja `app.js`).
-- **Pločice:** najviše dvije vidljive akcije; ostale su u meniju iza tri tačke (`<details class="menu">`).
+- **Podloga:** gotovo crna (`--bg`), s blagim ljubičastim i cijan svjetlom u gornjim uglovima. Ploče (`--panel`) imaju tanak svijetli rub, zaobljenje 18 px i blag prijelaz odozgo.
+- **Boja akcije** je prijelaz ljubičasta → plava (`--grad`, `--accent`): glavno dugme, uključen prekidač, traka napretka, stubići glasnoće, prijedlozi.
+- **Cijan** (`--pick`) znači korisnikov izbor: označeni dio trake, izabrani red transkripta, linkovi.
+- **Žuta** (`--warn`) je samo upozorenje, crvena (`--bad`) brisanje i greška, zelena (`--ok`) gotovo i objavljeno.
+- **Pismo:** Segoe UI Variable (Display za naslove, Text za ostalo), bez vanjskih fontova.
+- **Kontrole:** dugmad visine 40 px i polja visine 44 px, zaobljenje 12 px, bez reljefa. Glavno dugme ima sjaj ispod sebe. Fokus je obojen rub s prstenom.
+- **Raspored:** bočni meni s grupama Your footage, Create, Clip for campaigns; na uskom ekranu se sklapa u traku na vrhu. Samo tamna tema.
+- **Tabovi** (`data-tabs`, `data-tab`, `data-panel` u `app.js`) dijele dugu stranicu na dijelove; izabrani se pamti u adresi (`#clips`, `#find`, `#cut`, `#rules`). Dugme s `data-tab-go` vodi na drugi tab. Koriste ih stranica kampanje i stranica klipa.
+- **Brisanje je uvijek vidljivo:** na kartici kampanje, u zaglavlju kampanje i klipa, te u dnu taba Rules. Meni iza tri tačke ostaje samo za sporedne akcije na starim stranicama.
+- **Označavanje više stavki:** traka `bulk-bar` (Select all, broj označenih, Delete selected) radi na stranici Shorts i u tabu Clips kampanje; isti kod u `app.js`, a `data-noun` na formi daje riječ za potvrdu.
+- **Potvrda prije brisanja** je prozor u stilu aplikacije (`<dialog>`). Tekst dolazi iz atributa `data-confirm`: dio do prvog upitnika je naslov, ostatak objašnjenje.
 - **Poruke** nakon akcije iskaču u donjem desnom uglu; potvrda sama nestane, greška ostaje dok se ne zatvori.
-- **Bočni meni** pokazuje šta se trenutno pravi u pozadini, sa svake stranice.
-- **Prazne liste** kažu šta tu nastaje i čime se počinje.
+- **Kretanje:** sadržaj stranice se pri otvaranju blago podigne (jedna animacija), kartice se na prelazak mišem podignu za 1–2 px. Uz `prefers-reduced-motion` nema ničega.
 
 Sve boje, zaobljenja i visine kontrola su varijable na vrhu `style.css`. Pomoćne funkcije za ikone, meni, link nazad i prazno stanje su na vrhu `views.js` (`icon`, `menu`, `crumb`, `emptyState`).
 

@@ -40,7 +40,7 @@ const emptyState = (iconName, title, text, action = '') =>
   `<div class="empty">${icon(iconName)}<strong>${title}</strong><p>${text}</p>${action}</div>`;
 
 // Znak aplikacije: jedan blok presječen na dva dijela.
-const BRAND_MARK = '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3H11l-3 14H4.5A1.5 1.5 0 0 1 3 15.5z" fill="#ffb02e"/><path d="M13 3h2.5A1.5 1.5 0 0 1 17 4.5v11a1.5 1.5 0 0 1-1.5 1.5H10z" fill="#6cb6ff"/></svg>';
+const BRAND_MARK = '<svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true"><path d="M3 4.5A1.5 1.5 0 0 1 4.5 3H11l-3 14H4.5A1.5 1.5 0 0 1 3 15.5z" fill="#8b7dff"/><path d="M13 3h2.5A1.5 1.5 0 0 1 17 4.5v11a1.5 1.5 0 0 1-1.5 1.5H10z" fill="#4fd1ff"/></svg>';
 
 function layout(ctx, title, body) {
   // Stavka je aktivna i na podstranicama; `also` su adrese koje joj pripadaju a ne počinju isto.
@@ -68,16 +68,15 @@ function layout(ctx, title, body) {
   <aside class="side">
     <a class="brand" href="/">${BRAND_MARK}<span>${h(cfg.appName)}</span></a>
     <nav class="side-nav" aria-label="Main">
-      <p class="side-label">Library</p>
+      <p class="side-label">Your footage</p>
       ${nav('/recordings', 'Recordings', 'recordings')}
       <p class="side-label">Create</p>
       ${nav('/shorts', 'Shorts', 'shorts', ['/clips'])}
       ${nav('/thumbnails', 'Thumbnails', 'thumbnails')}
       ${nav('/videos', 'Videos', 'videos')}
-      <p class="side-label">Assets</p>
       ${nav('/bumpers', 'Intros and outros', 'bumpers')}
-      <p class="side-label">Clipping</p>
-      ${nav('/clipping', 'Campaigns', 'kit')}
+      <p class="side-label">Clip for campaigns</p>
+      ${nav('/clipping', 'Clipping campaigns', 'kit')}
     </nav>
     <a class="side-activity" id="side-activity" href="/shorts" hidden><span class="spinner"></span><span id="side-activity-text"></span></a>
     <p class="side-foot"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></p>

@@ -332,6 +332,21 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
     redirect(ctx, back);
   });
 
+  // Brisanje više označenih klipova odjednom.
+  route('POST', '/clipping/:id/clips/delete', async (ctx) => {
+    const campaign = userCampaign(ctx);
+    if (!campaign) return redirect(ctx, '/clipping');
+    const form = await readForm(ctx.req);
+    const ids = new Set(form.getAll('ids').map(Number));
+    const picked = campaignClips(campaign).filter((c) => ids.has(c.id));
+    for (const clip of picked) {
+      if (clip.status === 'pending' || clip.status === 'rendering') studio.cancelClip(clip);
+      else studio.deleteClip(clip);
+    }
+    flash(ctx, picked.length ? 'ok' : 'bad', picked.length ? `${picked.length} ${picked.length === 1 ? 'clip has' : 'clips have'} been deleted.` : 'No clip was selected.');
+    redirect(ctx, `/clipping/${campaign.id}`);
+  });
+
   // Prekid: uklanja klipove kampanje koji još nisu gotovi.
   route('POST', '/clipping/:id/cancel', (ctx) => {
     const campaign = userCampaign(ctx);

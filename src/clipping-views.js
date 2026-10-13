@@ -1,6 +1,6 @@
 'use strict';
 // Stranice sekcije Clipping: kampanje, radni prostor jedne kampanje i stranica klipa.
-const { h, icon, crumb, menu, emptyState, meta, layout, fmtTime, fmtSize, progressBar, studioPoll } = require('./views');
+const { h, icon, crumb, emptyState, meta, layout, fmtTime, fmtSize, progressBar, studioPoll } = require('./views');
 const { LAYOUTS } = require('./lib/media');
 const { PLATFORMS, withPrefix, bannedList, checkClip, platformCaption } = require('./lib/clipping');
 
@@ -42,20 +42,21 @@ function campaignFields(c, recordings) {
 }
 
 function campaignsPage(ctx, { campaigns, recordings }) {
-  const rows = campaigns
+  const cards = campaigns
     .map(
-      (c) => `<li class="rec camp">
-      <div class="rec-body">
-        <div class="rec-head">
-          <a class="rec-title" href="/clipping/${c.id}">${h(c.name)}</a>
-          <a class="button" href="/clipping/${c.id}">Open</a>
-        </div>
-        ${meta(
-          c.recording_name ? h(c.recording_name) : 'Episode missing',
-          `${c.clips} ${c.clips === 1 ? 'clip' : 'clips'}`,
-          `${c.posted} posted`,
-          withPrefix(c.hashtags, '#').join(' ')
-        )}
+      (c) => `<li class="camp">
+      <div>
+        <a class="camp-name" href="/clipping/${c.id}">${h(c.name)}</a>
+        ${meta(c.recording_name ? h(c.recording_name) : '<span class="chip bad">Episode missing</span>', withPrefix(c.hashtags, '#').join(' '))}
+      </div>
+      <dl class="camp-stats">
+        <div><dt>Clips</dt><dd>${c.clips}</dd></div>
+        <div><dt>Posted</dt><dd>${c.posted}</dd></div>
+        <div><dt>Shortest</dt><dd>${c.min_seconds} s</dd></div>
+      </dl>
+      <div class="camp-actions">
+        <a class="button primary" href="/clipping/${c.id}">Open</a>
+        <form method="post" action="/clipping/${c.id}/delete" data-confirm="Delete the campaign “${h(c.name)}”? Its ${c.clips} ${c.clips === 1 ? 'clip is' : 'clips are'} deleted too. The episode stays in your recordings."><button class="danger-outline">${icon('trash')}Delete</button></form>
       </div>
     </li>`
     )
@@ -70,11 +71,12 @@ function campaignsPage(ctx, { campaigns, recordings }) {
     ctx,
     'Clipping',
     `<div class="page-head">
-  <h1>Clipping</h1>
+  <div class="head-title"><h1>Clipping campaigns</h1></div>
+  ${campaigns.length ? `<div class="head-actions"><a class="button primary" href="#new">${icon('plus')}New campaign</a></div>` : ''}
 </div>
 <p class="folder-hint lead">A campaign holds the rules of one brief: which episode to clip, the tags and hashtags every post needs, the words you must not use and the shortest clip allowed. Every clip you make in it is checked against those rules.</p>
-${campaigns.length ? `<ul class="recs">${rows}</ul>` : ''}
-<section class="card form-card camp-new">
+${campaigns.length ? `<ul class="camps">${cards}</ul>` : ''}
+<section class="card camp-new" id="new">
   <h2>New campaign</h2>
   ${form}
 </section>`
@@ -188,6 +190,7 @@ function campaignPage(ctx, { campaign, rec, transcript, lines, clips, recordings
             ? `<span class="chip warn">${issues} ${issues === 1 ? 'thing' : 'things'} to fix</span>`
             : '<span class="chip ok">Ready to post</span>';
       return `<li class="short" data-poll-key="clip:${c.id}" data-state="${h(c.status)}">
+      <label class="pick"><input type="checkbox" name="ids" value="${c.id}" form="bulk-form" aria-label="Select “${h(c.title)}”"></label>
       ${frame}
       <strong class="short-title">${h(c.title)}</strong>
       ${meta(state, c.posted ? `<span class="chip info">Posted on ${c.posted} of ${PLATFORMS.length}</span>` : '', `from ${fmtTime(c.start_s)}`)}
@@ -200,55 +203,88 @@ function campaignPage(ctx, { campaign, rec, transcript, lines, clips, recordings
     .join('');
   const clipsBusy = clips.some((c) => c.status === 'pending' || c.status === 'rendering');
 
-  return layout(
-    ctx,
-    campaign.name,
-    `<div class="page-head">
-  <div class="head-title">${crumb('/clipping', 'Clipping')}<h1>${h(campaign.name)}</h1></div>
-  <div class="head-actions">
-    ${menu(
-      'More actions for this campaign',
-      `<form method="post" action="/clipping/${campaign.id}/delete" data-confirm="Delete the campaign “${h(campaign.name)}”? Its ${clips.length} ${clips.length === 1 ? 'clip is' : 'clips are'} deleted too. The episode stays in your recordings."><button class="danger-outline">${icon('trash')}Delete campaign</button></form>`,
-      'drop-down'
-    )}
-  </div>
-</div>
-${rec ? meta(h(rec.name), fmtTime(rec.duration), `shortest clip ${campaign.min_seconds} s`, withPrefix(campaign.hashtags, '#').join(' '), bannedList(campaign).length ? `never say: ${h(bannedList(campaign).join(', '))}` : '').replace('class="meta"', 'class="meta camp-rules"') : ''}
-${source}
-${
-  rec
-    ? `<section class="card cl-suggest">
-  <h2>Suggest clips</h2>
-  <p class="muted small">The app picks the loudest, most talkative scenes of the episode and cuts each on sentence ends. You look through them and choose which become clips. Scenes already in your clips are skipped. Transcribe the episode first.</p>
+  const unfinished = clips.filter((c) => c.status === 'pending' || c.status === 'rendering').length;
+  const ready = transcript && transcript.status === 'ready';
+  const deleteForm = `<form method="post" action="/clipping/${campaign.id}/delete" data-confirm="Delete the campaign “${h(campaign.name)}”? Its ${clips.length} ${clips.length === 1 ? 'clip is' : 'clips are'} deleted too. The episode stays in your recordings."><button class="danger-outline">${icon('trash')}Delete campaign</button></form>`;
+  const find = !rec
+    ? ''
+    : ready
+      ? `<section class="card cl-suggest">
+  <h2>Let the app find scenes</h2>
+  <p class="muted small">The app picks the loudest, most talkative scenes of the episode and cuts each on sentence ends. You listen to them and choose which become clips. Scenes already in your clips are skipped.</p>
   <form method="get" action="/clipping/${campaign.id}/suggest" class="cl-suggest-form">
     <label>How many
-      <select name="count" data-remember="suggest-count">${[5, 10, 15, 20].map((n) => `<option value="${n}"${n === 10 ? ' selected' : ''}>${n} clips</option>`).join('')}</select>
+      <select name="count" data-remember="suggest-count">${[5, 10, 15, 20].map((n) => `<option value="${n}"${n === 10 ? ' selected' : ''}>${n} scenes</option>`).join('')}</select>
     </label>
     <label>Length of each
       <select name="length" data-remember="suggest-length">${[15, 30, 45].map((n) => `<option value="${n}"${n === 30 ? ' selected' : ''}>About ${n} s</option>`).join('')}</select>
     </label>
-    <button class="primary">${icon('split')}Find scenes</button>
+    <button class="primary">${icon('scan')}Find scenes</button>
   </form>
 </section>`
-    : ''
-}
+      : emptyState('captions', 'Transcribe the episode first', 'Scenes are chosen from what is said, so the app has to listen to the episode once. You start that under “Cut by hand”.', '<button type="button" class="primary" data-tab-go="cut">Open “Cut by hand”</button>');
 
-<div id="live-clips" data-live>
-  <div class="list-head">
-    <h2>Clips in this campaign</h2>
-    ${clipsBusy ? `<form method="post" action="/clipping/${campaign.id}/cancel" data-confirm="Stop creating clips? Unfinished clips are removed. Finished clips stay."><button class="danger-outline">Stop creating clips</button></form>` : ''}
-  </div>
-  ${clips.length ? `<ul class="shorts">${tiles}</ul>` : emptyState('shorts', 'No clips yet', 'Pick a scene above and select “Create clip”. Each clip is checked against the campaign rules before you post it.')}
-  ${studioPoll(clipsBusy && ffmpegOk, '', 'clip')}
+  // Otvara se onaj dio koji je sljedeći na redu: klipovi ako ih ima, inače traženje scena ili ručni rez.
+  const first = clips.length ? 'clips' : ready ? 'find' : 'cut';
+  return layout(
+    ctx,
+    campaign.name,
+    `<div class="page-head">
+  <div class="head-title">${crumb('/clipping', 'Clipping campaigns')}<h1>${h(campaign.name)}</h1></div>
+  <div class="head-actions">${deleteForm}</div>
+</div>
+${rec ? meta(h(rec.name), fmtTime(rec.duration), `shortest clip ${campaign.min_seconds} s`, withPrefix(campaign.hashtags, '#').join(' '), bannedList(campaign).length ? `never say: ${h(bannedList(campaign).join(', '))}` : '').replace('class="meta"', 'class="meta camp-rules"') : ''}
+
+<div class="tabs" role="tablist" aria-label="Parts of this campaign" data-tabs data-default="${first}">
+  <button type="button" role="tab" data-tab="clips">Clips <span class="count">${clips.length}</span></button>
+  <button type="button" role="tab" data-tab="find">Find scenes</button>
+  <button type="button" role="tab" data-tab="cut">Cut by hand</button>
+  <button type="button" role="tab" data-tab="rules">Rules</button>
 </div>
 
-<details class="card camp-edit">
-  <summary>Campaign rules</summary>
-  <form method="post" action="/clipping/${campaign.id}" class="stack">
-    ${campaignFields(campaign, recordings)}
-    <div><button class="primary">Save rules</button></div>
-  </form>
-</details>`
+<div data-panel="clips">
+  <div id="live-clips" data-live>
+    ${
+      unfinished
+        ? `<div class="queue-bar"><span><span class="spinner"></span>Creating ${unfinished} ${unfinished === 1 ? 'clip' : 'clips'}…</span>
+      <form method="post" action="/clipping/${campaign.id}/cancel" data-confirm="Stop creating clips? Unfinished clips are removed. Finished clips stay."><button class="danger-outline">Stop creating clips</button></form></div>`
+        : ''
+    }
+    ${
+      clips.length
+        ? `<form method="post" action="/clipping/${campaign.id}/clips/delete" id="bulk-form" class="bulk-bar" data-noun="clip" data-confirm="Delete the selected clips?">
+      <label class="check"><input type="checkbox" id="bulk-all"> Select all</label>
+      <span class="muted" id="bulk-count">None selected</span>
+      <button class="danger-outline" id="bulk-delete" disabled>${icon('trash')}Delete selected</button>
+    </form>
+    <ul class="shorts">${tiles}</ul>`
+        : emptyState('shorts', 'No clips yet', 'Let the app find scenes for you, or cut one by hand. Each clip is checked against the campaign rules before you post it.', '<button type="button" class="primary" data-tab-go="' + (ready ? 'find' : 'cut') + '">' + (ready ? 'Find scenes' : 'Start with the episode') + '</button>')
+    }
+    ${studioPoll(clipsBusy && ffmpegOk, '', 'clip')}
+  </div>
+</div>
+
+<div data-panel="find" hidden>
+${find}
+</div>
+
+<div data-panel="cut" hidden>
+${source}
+</div>
+
+<div data-panel="rules" hidden>
+  <section class="card camp-new">
+    <h2>Campaign rules</h2>
+    <form method="post" action="/clipping/${campaign.id}" class="stack">
+      ${campaignFields(campaign, recordings)}
+      <div><button class="primary">Save rules</button></div>
+    </form>
+  </section>
+  <div class="danger-zone camp-new">
+    <p><strong>Delete this campaign</strong><br><span class="muted">Its ${clips.length} ${clips.length === 1 ? 'clip is' : 'clips are'} deleted too. The episode stays in your recordings.</span></p>
+    ${deleteForm}
+  </div>
+</div>`
   );
 }
 
@@ -322,6 +358,32 @@ function clipPage(ctx, { campaign, clip, posts, lines, canEdit }) {
     </div>`;
   }).join('');
 
+  const editForm = canEdit
+    ? `<form method="post" action="/clipping/clips/${clip.id}/edit" class="stack clip-edit">
+      <p class="muted small">Times are positions in the episode. Saving creates the clip again; your caption and posts stay.</p>
+      <div class="cap-style two">
+        <label>Start<input name="start" value="${fmtFine(clip.start_s)}" required autocomplete="off"></label>
+        <label>End<input name="end" value="${fmtFine(clip.end_s)}" required autocomplete="off"></label>
+      </div>
+      <div class="cap-style two">
+        <label>Hook from <span class="muted">(empty for none)</span><input name="hook_start" value="${hook ? fmtFine(hook.start) : ''}" autocomplete="off"></label>
+        <label>Hook to<input name="hook_end" value="${hook ? fmtFine(hook.end) : ''}" autocomplete="off"></label>
+      </div>
+      <label class="check"><input type="checkbox" name="trim_silence" value="1"${trimmed ? ' checked' : ''}> Cut out pauses in the talking</label>
+      <label>Layout
+        <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}"${id === clip.layout ? ' selected' : ''}>${h(n)}</option>`).join('')}</select>
+      </label>
+      ${
+        lines.length
+          ? `<h2>Captions</h2>
+      <p class="muted small">Fix words that were heard wrong; empty a line to remove it. If you change the times above, the captions are taken from the transcript again and these fixes are lost.</p>
+      <ol class="cap-fix">${lines.map((l, i) => `<li><span class="muted small">${fmtTime(l.start)}</span><input name="line_${i}" value="${h(l.text)}" maxlength="200" data-seek="${l.start}" aria-label="Caption at ${fmtTime(l.start)}"></li>`).join('')}</ol>`
+          : ''
+      }
+      <div><button class="primary">${icon('split')}Save and create again</button></div>
+    </form>`
+    : '<p class="muted">This clip cannot be changed: its episode is no longer in your recordings, or ffmpeg is missing.</p>';
+
   return layout(
     ctx,
     clip.title,
@@ -329,70 +391,45 @@ function clipPage(ctx, { campaign, clip, posts, lines, canEdit }) {
   <div class="head-title">${crumb(`/clipping/${campaign.id}`, h(campaign.name))}<h1>${h(clip.title)}</h1></div>
   <div class="head-actions">
     <a class="button primary" href="/clips/${clip.id}/file?download=1">${icon('download')}Download</a>
-    ${menu(
-      'More actions for this clip',
-      `<a href="/clipping/${campaign.id}?start=${fmtExact(clip.start_s)}&end=${fmtExact(clip.end_s)}">${icon('split')}Make a variation</a>
-      <hr>
-      <form method="post" action="/clipping/clips/${clip.id}/delete" data-confirm="Delete the clip “${h(clip.title)}”? Its video file is deleted too."><button class="danger-outline">${icon('trash')}Delete</button></form>`,
-      'drop-down'
-    )}
+    <a class="button" href="/clipping/${campaign.id}?start=${fmtExact(clip.start_s)}&end=${fmtExact(clip.end_s)}#cut">${icon('split')}Make a variation</a>
+    <form method="post" action="/clipping/clips/${clip.id}/delete" data-confirm="Delete the clip “${h(clip.title)}”? Its video file is deleted too."><button class="danger-outline">${icon('trash')}Delete</button></form>
   </div>
 </div>
 <div class="cap-layout">
   <section class="card">
     <video class="kit-video" id="clip-player" src="/clips/${clip.id}/file?v=${clip.size}" poster="/clips/${clip.id}/thumb?v=${clip.size}" controls preload="none" playsinline></video>
     ${meta(`${(clip.length_s || 0).toFixed(1)} s`, fmtSize(clip.size), `from ${fmtTime(clip.start_s)} to ${fmtTime(clip.end_s)}`, hook ? `hook from ${fmtTime(hook.start)}` : 'no hook')}
-    <details class="clip-edit">
-      <summary>Edit this clip</summary>
-      ${
-        canEdit
-          ? `<form method="post" action="/clipping/clips/${clip.id}/edit" class="stack">
-        <p class="muted small">Times are positions in the episode. Saving creates the clip again; your caption and posts stay.</p>
-        <div class="cap-style">
-          <label>Start<input name="start" value="${fmtFine(clip.start_s)}" required autocomplete="off"></label>
-          <label>End<input name="end" value="${fmtFine(clip.end_s)}" required autocomplete="off"></label>
-        </div>
-        <div class="cap-style">
-          <label>Hook from<input name="hook_start" value="${hook ? fmtFine(hook.start) : ''}" autocomplete="off"></label>
-          <label>Hook to<input name="hook_end" value="${hook ? fmtFine(hook.end) : ''}" autocomplete="off"></label>
-        </div>
-        <label class="check"><input type="checkbox" name="trim_silence" value="1"${trimmed ? ' checked' : ''}> Cut out pauses in the talking</label>
-        <label>Layout
-          <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}"${id === clip.layout ? ' selected' : ''}>${h(n)}</option>`).join('')}</select>
+  </section>
+  <div>
+    <div class="tabs" role="tablist" aria-label="Parts of this clip" data-tabs data-default="post">
+      <button type="button" role="tab" data-tab="post">Check and post${problems ? ` <span class="count">${problems}</span>` : ''}</button>
+      <button type="button" role="tab" data-tab="edit">Edit clip</button>
+    </div>
+    <section class="card" data-panel="post">
+      <h2>Campaign rules ${problems ? `<span class="chip warn">${problems} to fix</span>` : '<span class="chip ok">All passed</span>'}</h2>
+      <ul class="checks">${checks
+        .map((c) => `<li class="${c.ok ? 'is-ok' : 'is-bad'}"><span class="check-mark" aria-hidden="true">${c.ok ? '✓' : '!'}</span><div><strong>${h(c.label)}</strong><p class="muted small">${h(c.detail)}</p></div></li>`)
+        .join('')}</ul>
+      <p class="muted small">The tags and hashtags of the campaign are added to every text below, so they cannot be forgotten. What the app cannot check: that the footage is from the right episode, that the clip is not posted to another campaign, and that the caption is fair to the show.</p>
+
+      <form method="post" action="/clipping/clips/${clip.id}" class="stack">
+        <h2>Caption</h2>
+        <label>Title<input name="title" maxlength="100" value="${h(clip.title)}" required></label>
+        <label>What happens on screen <span class="muted">(short, in your own words)</span>
+          <textarea name="caption" rows="2" maxlength="300" placeholder="he really thought that was a warm-up">${h(clip.caption || '')}</textarea>
         </label>
-        ${
-          lines.length
-            ? `<h3>Captions</h3>
-        <p class="muted small">Fix words that were heard wrong; empty a line to remove it. If you change the times above, the captions are taken from the transcript again and these fixes are lost.</p>
-        <ol class="cap-fix">${lines.map((l, i) => `<li><span class="muted small">${fmtTime(l.start)}</span><input name="line_${i}" value="${h(l.text)}" maxlength="200" data-seek="${l.start}" aria-label="Caption at ${fmtTime(l.start)}"></li>`).join('')}</ol>`
-            : ''
-        }
-        <div><button class="primary">${icon('split')}Save and create again</button></div>
-      </form>`
-          : '<p class="muted small">This clip cannot be changed: its episode is no longer in your recordings, or ffmpeg is missing.</p>'
-      }
-    </details>
-  </section>
-  <section class="card">
-    <h2>Campaign rules ${problems ? `<span class="chip warn">${problems} to fix</span>` : '<span class="chip ok">All passed</span>'}</h2>
-    <ul class="checks">${checks
-      .map((c) => `<li class="${c.ok ? 'is-ok' : 'is-bad'}"><span class="check-mark" aria-hidden="true">${c.ok ? '✓' : '!'}</span><div><strong>${h(c.label)}</strong><p class="muted small">${h(c.detail)}</p></div></li>`)
-      .join('')}</ul>
-    <p class="muted small">The tags and hashtags of the campaign are added to every text below, so they cannot be forgotten. What the app cannot check: that the footage is from the right episode, that the clip is not posted to another campaign, and that the caption is fair to the show.</p>
 
-    <form method="post" action="/clipping/clips/${clip.id}" class="stack">
-      <h2>Caption</h2>
-      <label>Title<input name="title" maxlength="100" value="${h(clip.title)}" required></label>
-      <label>What happens on screen <span class="muted">(short, in your own words)</span>
-        <textarea name="caption" rows="2" maxlength="300" placeholder="he really thought that was a warm-up">${h(clip.caption || '')}</textarea>
-      </label>
-
-      <h2>Post it</h2>
-      <p class="muted small">Copy the text for each platform, post the downloaded clip there yourself, then tick it off here.</p>
-      ${blocks}
-      <div><button class="primary">Save</button></div>
-    </form>
-  </section>
+        <h2>Post it</h2>
+        <p class="muted small">Copy the text for each platform, post the downloaded clip there yourself, then tick it off here.</p>
+        ${blocks}
+        <div><button class="primary">Save</button></div>
+      </form>
+    </section>
+    <section class="card" data-panel="edit" hidden>
+      <h2>Edit this clip</h2>
+      ${editForm}
+    </section>
+  </div>
 </div>`
   );
 }
