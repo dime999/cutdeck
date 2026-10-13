@@ -19,6 +19,8 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 
 Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga sam kroz YouTube Studio.
 
+Kako je sve napravljeno i zašto, stoji u [bazi znanja](docs/KNOWLEDGE_BASE.md).
+
 ---
 
 ## Korak 1: Instaliraj Node.js i ffmpeg
