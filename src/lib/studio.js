@@ -437,7 +437,7 @@ function cancelClip(clip) {
  * koji su trebali uslijediti). Gotovi Shorts ostaju. Vraća koliko ih je uklonjeno.
  */
 function cancelShorts(userId) {
-  const unfinished = db.prepare("SELECT * FROM clips WHERE user_id=? AND status IN ('pending', 'rendering')").all(userId);
+  const unfinished = db.prepare("SELECT * FROM clips WHERE user_id=? AND campaign_id IS NULL AND status IN ('pending', 'rendering')").all(userId);
   const chained = 'SELECT id FROM clips WHERE user_id=? AND followup IS NOT NULL';
   const running = current && current.kind === 'captions' ? db.prepare(`SELECT 1 FROM captions WHERE id=? AND clip_id IN (${chained})`).get(current.id, userId) : null;
   db.prepare(`DELETE FROM captions WHERE status IN ('pending', 'transcribing') AND clip_id IN (${chained})`).run(userId);

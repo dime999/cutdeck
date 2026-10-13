@@ -135,6 +135,8 @@ Sekcija **Clipping** je odvojena od ostatka aplikacije i služi za kampanje u ko
 7. Otvori gotov klip. **Campaign rules** pokazuje šta je u redu, a šta treba popraviti: dužina, titlovi, zabranjene riječi u naslovu, opisu i titlovima, te da li si napisao opis.
 8. Napiši kratak opis svojim riječima. Ispod dobiješ gotov tekst za YouTube Shorts, TikTok, Instagram Reels i X, svaki s pravim tagom i hashtagovima kampanje. Klikni **Copy**, objavi klip sam, pa označi **Posted** i po želji upiši link.
 
+**Prijedlozi jednim klikom.** Kad je epizoda transkribovana, u kartici **Suggest clips** izaberi koliko klipova želiš (5 do 20), približnu dužinu (15, 30 ili 45 s) i raspored, pa klikni **Create suggested clips**. Aplikacija izabere najglasnije scene s najviše govora, reže ih na kraju rečenice i napravi gotove klipove s titlovima. Scene koje su već u tvojim klipovima preskače, pa novi klik daje nove scene. Naslov je početak onoga što se u sceni kaže; promijeni ga na stranici klipa. **Stop creating clips** uklanja nedovršene klipove. Izbor ne zna šta je smiješno ili zanimljivo, pa svaki klip pogledaj prije objave i slabe obriši.
+
 Za drugačiji rez iste scene klikni **Make a variation** na klipu: forma se otvori s istim početkom i krajem, pa promijeni hook ili raspored.
 
 Aplikacija ne može provjeriti da li je snimak iz prave epizode, da li je klip prijavljen i u drugu kampanju, ni ko ti gleda videe. **Split into Shorts** ne koristi za kampanje: niz PART 1, PART 2… je isto što i objava cijele epizode, što kampanje zabranjuju.

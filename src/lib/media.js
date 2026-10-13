@@ -319,6 +319,20 @@ function groupWords(words) {
 }
 
 /** Prepoznaje engleski govor u videu. Vraća riječi [{start, end, text}] sa vremenima u sekundama. */
+/**
+ * Jedan red izlaza filtera whisper: {"start":120,"end":480,"text":" word"}.
+ * ffmpeg ne označava navodnike u tekstu, pa red s izgovorenim citatom nije ispravan JSON;
+ * tada se tekst uzima onakav kakav jeste. Red koji se ne može pročitati se preskače (null).
+ */
+function parseWhisperRow(row) {
+  try {
+    return JSON.parse(row);
+  } catch {
+    const m = /^\s*\{\s*"start"\s*:\s*(-?\d+)\s*,\s*"end"\s*:\s*(-?\d+)\s*,\s*"text"\s*:\s*"(.*)"\s*\}\s*$/.exec(row);
+    return m ? { start: Number(m[1]), end: Number(m[2]), text: m[3].replace(/\\(["\\/])/g, '$1') } : null;
+  }
+}
+
 async function recognizeWords(file, duration, onProgress, signal) {
   const out = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.json`);
   // max_len=1 daje jedan zapis po riječi.
@@ -334,7 +348,8 @@ async function recognizeWords(file, duration, onProgress, signal) {
     const words = [];
     for (const row of text.split(/\r?\n/)) {
       if (!row.trim()) continue;
-      const item = JSON.parse(row);
+      const item = parseWhisperRow(row);
+      if (!item) continue;
       const word = String(item.text || '').trim();
       if (!word || /^[[(].*[\])]$/.test(word)) continue;
       words.push({ start: item.start / 1000, end: item.end / 1000, text: word });

@@ -72,6 +72,70 @@ function overlapShare(start, end, used) {
   return Math.max(0, ...used.map((u) => Math.max(0, Math.min(end, u.end) - Math.max(start, u.start)) / length));
 }
 
+/** Riječi složene u rečenice: rečenica se zatvara na tački, upitniku, uzvičniku ili pauzi dužoj od `maxGap`. */
+function sentences(words, maxGap = 0.8) {
+  const out = [];
+  let current = null;
+  for (const w of words) {
+    if (current && w.s - current.end > maxGap) current = null;
+    if (!current) out.push((current = { start: w.s, end: w.e, words: 0, text: '', strong: false }));
+    current.end = Math.max(current.end, w.e);
+    current.words++;
+    current.text += (current.text ? ' ' : '') + w.t;
+    if (/[.!?]["')\]]?$/.test(w.t)) {
+      current.strong = /[!?]/.test(w.t);
+      current = null;
+    }
+  }
+  return out;
+}
+
+/**
+ * Prijedlozi scena za klipove: nizovi cijelih rečenica dužine oko `target` sekundi, poredani po tome
+ * koliko su glasni i koliko se u njima govori. Scene se međusobno ne preklapaju i preskaču dijelove
+ * koji su već u klipovima (`used`). `waveform` je glasnoća 0–100 u jednakim odsječcima cijelog snimka.
+ */
+function suggestScenes({ words, waveform = [], duration, count, target, min = 0, used = [] }) {
+  const list = sentences(words);
+  const lower = Math.max(min, target * 0.6);
+  const upper = target * 1.5;
+  const loudness = (start, end) => {
+    if (!waveform.length || !(duration > 0)) return 0;
+    const from = Math.max(0, Math.floor((start / duration) * waveform.length));
+    const to = Math.min(waveform.length - 1, Math.floor((end / duration) * waveform.length));
+    let sum = 0;
+    for (let i = from; i <= to; i++) sum += waveform[i];
+    return sum / (to - from + 1) / 100;
+  };
+  const candidates = [];
+  for (let i = 0; i < list.length; i++) {
+    let spoken = 0;
+    let strong = 0;
+    for (let j = i; j < list.length; j++) {
+      if (j > i && list[j].start - list[j - 1].end > 4) break; // scena ne prelazi preko duge tišine
+      const start = Math.max(0, list[i].start - 0.15);
+      const end = Math.min(duration || Infinity, list[j].end + 0.25);
+      if (end - start > upper) break;
+      spoken += list[j].words;
+      strong += list[j].strong ? 1 : 0;
+      if (end - start < lower) continue;
+      const length = end - start;
+      const fit = 1 - Math.abs(length - target) / target; // scene bliže traženoj dužini imaju prednost
+      const score = 0.5 * loudness(start, end) + 0.3 * Math.min(1, spoken / length / 3.5) + 0.1 * (strong / (j - i + 1)) + 0.1 * fit;
+      candidates.push({ start: round2(start), end: round2(end), score, text: list[i].text });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  const picked = [];
+  for (const c of candidates) {
+    if (picked.length >= count) break;
+    if (overlapShare(c.start, c.end, used) >= 0.5) continue;
+    if (picked.some((p) => c.start < p.end && c.end > p.start)) continue;
+    picked.push(c);
+  }
+  return picked.sort((a, b) => a.start - b.start);
+}
+
 /** Tekst titlova bez ASS oznaka, za provjeru zabranjenih riječi. */
 const subtitleText = (ass) =>
   String(ass || '')
@@ -129,4 +193,4 @@ function platformCaption(campaign, clip, platform) {
   return [String(clip.caption || '').trim(), [...tags, ...hashtags].join(' ')].filter(Boolean).join(' ');
 }
 
-module.exports = { PLATFORMS, withPrefix, bannedList, removePauses, buildEdl, edlLength, mapWords, overlapShare, subtitleText, checkClip, platformCaption };
+module.exports = { PLATFORMS, withPrefix, bannedList, removePauses, buildEdl, edlLength, mapWords, overlapShare, sentences, suggestScenes, subtitleText, checkClip, platformCaption };

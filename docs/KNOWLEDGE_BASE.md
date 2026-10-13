@@ -145,6 +145,7 @@ Odvojena sekcija za clipping kampanje, u kojima se po zadanim pravilima klipa tu
 - **Provjera pravila** na stranici klipa: dužina, titlovi, zabranjene riječi (naslov, opis, titlovi), napisan opis.
 - **Tekst za objavu** po platformi: opis + tag te platforme + hashtagovi kampanje. Za svaku platformu se bilježi da li je objavljeno i link.
 - **Upozorenje na ponavljanje** kad se nova scena barem 50% poklapa s postojećim klipom kampanje; redovi transkripta koji su već iskorišteni su označeni.
+- **Prijedlozi** (`suggestScenes`): transkript se dijeli u rečenice; kandidat je niz cijelih rečenica dužine 0,6 do 1,5 tražene dužine, bez tišine duže od 4 s. Ocjena je 50% glasnoća (iz `recordings.waveform`), 30% gustina govora, 10% upitne i usklične rečenice, 10% blizina traženoj dužini. Biraju se najbolji koji se ne preklapaju međusobno ni (50% ili više) s postojećim klipovima. Svaki postaje običan klip kampanje.
 - **Varijacija**: link koji otvara formu s početkom i krajem postojećeg klipa.
 
 ## 5. Arhitektura
@@ -313,6 +314,7 @@ Nakon premotavanja preglednik javi `seeked` prije nego što je kadar dostupan za
 | `GET`, `POST /clipping` | Lista kampanja, nova kampanja |
 | `GET`, `POST /clipping/:id`, `POST /clipping/:id/delete` | Stranica kampanje, izmjena pravila, brisanje |
 | `POST /clipping/:id/transcribe`, `POST /clipping/:id/clips` | Transkript epizode, novi klip |
+| `POST /clipping/:id/suggest`, `POST /clipping/:id/cancel` | Predloženi klipovi, prekid nedovršenih |
 | `GET`, `POST /clipping/clips/:id`, `POST /clipping/clips/:id/delete` | Provjera pravila, tekst i evidencija objava; brisanje klipa |
 | `GET …/file`, `GET …/thumb` | Video i slike, uz podršku za Range |
 | `GET /api/studio/status` | Stanje poslova za osvježavanje stranica (`?campaign=N` za klipove kampanje, `?all=1` za bočni meni) |
@@ -377,6 +379,7 @@ Probni materijal je bio generisan: ffmpeg testna slika i sintetički Windows gla
 ## 14. Poznata ograničenja i neprovjereno
 
 - **Clipping je isproban samo na sintetičkom govoru od 90 sekundi.** Transkript cijele epizode od sat vremena nije mjeren (vrijeme, memorija), a izbacivanje pauza zavisi od tačnosti vremena riječi.
+- **Prijedlozi klipova** gledaju glasnoću i količinu govora, ne sadržaj. Glasnoća dolazi iz 240 odsječaka cijelog snimka, pa je kod epizode od sat vremena jedan odsječak 15 sekundi.
 - **Clipping ne provjerava** da li je snimak iz prave epizode, da li je klip prijavljen i u drugu kampanju, niti publiku naloga. Zabranjene riječi se traže samo u tekstu, ne u slici.
 - **Pravi PS5 snimak nikad nije isproban.** Posebno HDR: boje u Shortu ili videu mogu ispasti isprane, jer konverzija HDR-a nije ugrađena.
 - **Tačnost titlova** je mjerena samo na sintetičkom glasu. S pravim glasom i glasnom igrom ispod njega može biti lošija.

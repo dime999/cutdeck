@@ -205,9 +205,33 @@ function campaignPage(ctx, { campaign, rec, transcript, lines, clips, recordings
 </div>
 ${rec ? meta(h(rec.name), fmtTime(rec.duration), `shortest clip ${campaign.min_seconds} s`, withPrefix(campaign.hashtags, '#').join(' '), bannedList(campaign).length ? `never say: ${h(bannedList(campaign).join(', '))}` : '').replace('class="meta"', 'class="meta camp-rules"') : ''}
 ${source}
+${
+  rec
+    ? `<section class="card cl-suggest">
+  <h2>Suggest clips</h2>
+  <p class="muted small">The app picks the loudest, most talkative scenes of the episode, cuts each on sentence ends and creates the clips with captions. Scenes already in your clips are skipped. Transcribe the episode first.</p>
+  <form method="post" action="/clipping/${campaign.id}/suggest" class="cl-suggest-form">
+    <label>How many
+      <select name="count" data-remember="suggest-count">${[5, 10, 15, 20].map((n) => `<option value="${n}"${n === 10 ? ' selected' : ''}>${n} clips</option>`).join('')}</select>
+    </label>
+    <label>Length of each
+      <select name="length" data-remember="suggest-length">${[15, 30, 45].map((n) => `<option value="${n}"${n === 30 ? ' selected' : ''}>About ${n} s</option>`).join('')}</select>
+    </label>
+    <label>Layout
+      <select name="layout" data-remember="clip-layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
+    </label>
+    <label class="check"><input type="checkbox" name="trim_silence" value="1" data-remember="clip-trim" checked> Cut out pauses</label>
+    <button class="primary">${icon('split')}Create suggested clips</button>
+  </form>
+</section>`
+    : ''
+}
 
 <div id="live-clips" data-live>
-  <h2>Clips in this campaign</h2>
+  <div class="list-head">
+    <h2>Clips in this campaign</h2>
+    ${clipsBusy ? `<form method="post" action="/clipping/${campaign.id}/cancel" data-confirm="Stop creating clips? Unfinished clips are removed. Finished clips stay."><button class="danger-outline">Stop creating clips</button></form>` : ''}
+  </div>
   ${clips.length ? `<ul class="shorts">${tiles}</ul>` : emptyState('shorts', 'No clips yet', 'Pick a scene above and select “Create clip”. Each clip is checked against the campaign rules before you post it.')}
   ${studioPoll(clipsBusy && ffmpegOk, '', 'clip')}
 </div>
