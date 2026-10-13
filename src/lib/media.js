@@ -229,7 +229,7 @@ const CAPTION_FONTS = [
 ];
 const CAPTION_SIZES = { small: 0.038, medium: 0.05, large: 0.064 }; // udio visine videa
 const CAPTION_POSITIONS = ['bottom', 'middle', 'top'];
-const DEFAULT_CAPTION_STYLE = { font: 'Impact', size: 'medium', color: '#ffffff', position: 'bottom', upper: true };
+const DEFAULT_CAPTION_STYLE = { font: 'Impact', size: 'medium', color: '#ffffff', position: 'bottom', upper: true, highlight: '#ffe600' };
 
 // Putanja kao vrijednost opcije filtera: dvotačka se mora označiti, a navodnici čuvaju razmake.
 function filterPath(p) {
@@ -250,23 +250,74 @@ function transcribeProblem() {
   return null;
 }
 
-/** Sprječava preklapanje titlova i izbacuje prazne redove i oznake poput [BLANK_AUDIO]. */
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Vremena riječi za jedan red. Ako red ima isti broj riječi kao prije, izmjerena vremena
+ * se zadržavaju (i uklapaju u možda pomjeren raspon reda); inače se trajanje reda
+ * dijeli po dužini riječi.
+ */
+function fitWords(text, start, end, old) {
+  const tokens = text.split(' ').filter(Boolean);
+  const measured = Array.isArray(old) && old.length === tokens.length && old.every((w) => Number.isFinite(w.start) && Number.isFinite(w.end));
+  const span = measured ? old[old.length - 1].end - old[0].start : 0;
+  if (span > 0) {
+    const scale = (end - start) / span;
+    return tokens.map((t, i) => ({
+      text: t,
+      start: round2(start + (old[i].start - old[0].start) * scale),
+      end: round2(start + (old[i].end - old[0].start) * scale),
+    }));
+  }
+  const total = tokens.reduce((n, t) => n + t.length, 0);
+  let at = start;
+  return tokens.map((t) => {
+    const from = at;
+    at += ((end - start) * t.length) / total;
+    return { text: t, start: round2(from), end: round2(at) };
+  });
+}
+
+/** Sprječava preklapanje titlova, izbacuje prazne redove i oznake poput [BLANK_AUDIO] i računa vremena riječi. */
 function tidyLines(lines) {
   const out = [];
   for (const line of [...lines].sort((a, b) => a.start - b.start)) {
     const text = String(line.text || '').replace(/\s+/g, ' ').trim();
     if (!text || /^[[(].*[\])]$/.test(text)) continue;
-    const start = Math.max(line.start, out.length ? out[out.length - 1].end : 0);
-    const end = Math.max(line.end, start + 0.2);
-    out.push({ start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100, text });
+    const start = round2(Math.max(line.start, out.length ? out[out.length - 1].end : 0));
+    const end = round2(Math.max(line.end, start + 0.2));
+    out.push({ start, end, text, words: fitWords(text, start, end, line.words) });
   }
   return out;
 }
 
-/** Prepoznaje engleski govor u videu. Vraća [{start, end, text}] sa vremenima u sekundama. */
+/** Slaže prepoznate riječi u kratke redove: red se zatvara kad je pun, na kraju rečenice ili nakon pauze. */
+function groupWords(words) {
+  const lines = [];
+  let current = [];
+  const close = () => {
+    if (current.length) lines.push({ start: current[0].start, end: current[current.length - 1].end, text: current.map((w) => w.text).join(' '), words: current });
+    current = [];
+  };
+  for (const word of words) {
+    const length = current.reduce((n, w) => n + w.text.length + 1, 0) + word.text.length;
+    const pause = current.length ? word.start - current[current.length - 1].end : 0;
+    if (current.length && (length > CAPTION_CHARS || pause > 0.7)) close();
+    current.push(word);
+    if (/[.!?]$/.test(word.text)) close();
+  }
+  close();
+  return lines;
+}
+
+/**
+ * Prepoznaje engleski govor u videu. Vraća redove [{start, end, text, words}] sa vremenima
+ * u sekundama; `words` su riječi reda sa svojim vremenima, za isticanje izgovorene riječi.
+ */
 async function transcribe(file, duration, onProgress) {
   const out = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.json`);
-  const options = [`model=${filterPath(cfg.whisperModel)}`, 'language=en', 'queue=20', `max_len=${CAPTION_CHARS}`, `destination=${filterPath(out)}`, 'format=json'];
+  // max_len=1 daje jedan zapis po riječi; u redove ih slaže groupWords.
+  const options = [`model=${filterPath(cfg.whisperModel)}`, 'language=en', 'queue=20', 'max_len=1', `destination=${filterPath(out)}`, 'format=json'];
   try {
     await run(
       cfg.ffmpeg,
@@ -274,13 +325,15 @@ async function transcribe(file, duration, onProgress) {
       progressParser(duration, onProgress)
     );
     const text = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : '';
-    const lines = [];
+    const words = [];
     for (const row of text.split(/\r?\n/)) {
       if (!row.trim()) continue;
       const item = JSON.parse(row);
-      lines.push({ start: item.start / 1000, end: item.end / 1000, text: item.text });
+      const word = String(item.text || '').trim();
+      if (!word || /^[[(].*[\])]$/.test(word)) continue;
+      words.push({ start: item.start / 1000, end: item.end / 1000, text: word });
     }
-    return tidyLines(lines);
+    return tidyLines(groupWords(words));
   } finally {
     fs.rm(out, { force: true }, () => {});
   }
@@ -296,13 +349,27 @@ const assTime = (t) => {
 function buildAss(lines, style, { width, height }) {
   const s = { ...DEFAULT_CAPTION_STYLE, ...style };
   const size = Math.round(height * (CAPTION_SIZES[s.size] || CAPTION_SIZES.medium));
-  const [, r, g, b] = /^#(..)(..)(..)$/.exec(s.color) || [null, 'ff', 'ff', 'ff'];
+  // ASS piše boje obrnutim redom: plava, zelena, crvena.
+  const bgr = (hex, fallback) => {
+    const m = /^#(..)(..)(..)$/.exec(hex || '');
+    return m ? `${m[3]}${m[2]}${m[1]}` : fallback;
+  };
+  const primary = bgr(s.color, 'ffffff');
+  const highlight = bgr(s.highlight, null);
   const alignment = { bottom: 2, middle: 5, top: 8 }[s.position] || 2;
   // Dolje se ostavlja mjesta za naslov i dugmad koje YouTube crta preko Shorta.
   const marginV = Math.round(height * (s.position === 'top' ? 0.1 : 0.2));
-  const events = lines.map((l) => {
-    const text = (s.upper ? l.text.toUpperCase() : l.text).replace(/[{}]/g, '').replace(/\\/g, '/').replace(/\s+/g, ' ');
-    return `Dialogue: 0,${assTime(l.start)},${assTime(l.end)},Default,,0,0,0,,${text}`;
+  const clean = (text) => (s.upper ? text.toUpperCase() : text).replace(/[{}]/g, '').replace(/\\/g, '/').replace(/\s+/g, ' ');
+  const dialogue = (start, end, text) => `Dialogue: 0,${assTime(start)},${assTime(end)},Default,,0,0,0,,${text}`;
+  const events = lines.flatMap((l) => {
+    if (!highlight || !l.words || !l.words.length) return [dialogue(l.start, l.end, clean(l.text))];
+    // Isticanje: po jedan događaj za svaku riječ, sa cijelim redom i tom riječju u drugoj boji.
+    return l.words.map((word, i) => {
+      const from = i === 0 ? l.start : word.start;
+      const to = i === l.words.length - 1 ? l.end : l.words[i + 1].start;
+      const text = l.words.map((w, j) => (j === i ? `{\\c&H${highlight}&}${clean(w.text)}{\\c&H${primary}&}` : clean(w.text))).join(' ');
+      return dialogue(from, Math.max(to, from + 0.01), text);
+    });
   });
   return [
     '[Script Info]',
@@ -314,7 +381,7 @@ function buildAss(lines, style, { width, height }) {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Default,${s.font},${size},&H00${b}${g}${r},&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${Math.round(size * 0.08)},0,${alignment},${Math.round(width * 0.06)},${Math.round(width * 0.06)},${marginV},1`,
+    `Style: Default,${s.font},${size},&H00${primary},&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,${Math.round(size * 0.08)},0,${alignment},${Math.round(width * 0.06)},${Math.round(width * 0.06)},${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',

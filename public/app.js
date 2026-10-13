@@ -607,16 +607,51 @@ if (capVideo) {
   const SIZES = { small: 0.038, medium: 0.05, large: 0.064 }; // udio visine videa, kao pri upisivanju u sliku
   // Desni dio stranice se zamjenjuje kad prepoznavanje završi, pa se polja traže svaki put iznova.
   const value = (id, fallback) => document.getElementById(id)?.value ?? fallback;
+  const field = (row, name) => row.querySelector(`input[name="${name}"]`);
   const lines = () =>
-    [...document.querySelectorAll('#cap-lines li')].map((li) => {
-      const [start, end, text] = li.querySelectorAll('input');
-      return { start: Number(start.value), end: Number(end.value), text: text.value.trim() };
+    [...document.querySelectorAll('#cap-lines li')].map((row) => ({
+      start: Number(field(row, 'start').value),
+      end: Number(field(row, 'end').value),
+      text: field(row, 'text').value.trim().replace(/\s+/g, ' '),
+      measured: JSON.parse(row.dataset.words || '[]'),
+    }));
+
+  // Vremena riječi u redu, isto kao na serveru: izmjerena ako se broj riječi nije promijenio,
+  // inače podijeljena po dužini riječi.
+  function wordTimes(line) {
+    const tokens = line.text.split(' ').filter(Boolean);
+    const old = line.measured;
+    const span = old.length === tokens.length ? old[old.length - 1].end - old[0].start : 0;
+    if (span > 0) {
+      const scale = (line.end - line.start) / span;
+      return tokens.map((text, i) => ({ text, start: line.start + (old[i].start - old[0].start) * scale }));
+    }
+    const total = tokens.reduce((n, t) => n + t.length, 0);
+    let at = line.start;
+    return tokens.map((text) => {
+      const start = at;
+      at += ((line.end - line.start) * text.length) / total;
+      return { text, start };
     });
+  }
 
   function showCaption() {
     const t = capVideo.currentTime;
     const line = lines().find((l) => l.text && t >= l.start && t < l.end);
-    overlay.textContent = line ? (document.getElementById('cap-upper')?.checked ? line.text.toUpperCase() : line.text) : '';
+    const upper = document.getElementById('cap-upper')?.checked;
+    const highlight = document.getElementById('cap-highlight-on')?.checked ? value('cap-highlight', '') : '';
+    overlay.textContent = '';
+    if (line) {
+      const words = wordTimes(line);
+      // Izgovorena riječ je posljednja čije je vrijeme već počelo.
+      const spoken = words.reduce((found, w, i) => (t >= w.start ? i : found), 0);
+      words.forEach((w, i) => {
+        const span = document.createElement('span');
+        span.textContent = upper ? w.text.toUpperCase() : w.text;
+        if (highlight && i === spoken) span.style.color = highlight;
+        overlay.append(span, ' ');
+      });
+    }
     const size = capVideo.clientHeight * (SIZES[value('cap-size', 'medium')] || SIZES.medium);
     overlay.style.fontSize = `${size}px`;
     overlay.style.fontFamily = `${value('cap-font', 'Impact')}, 'Arial Black', sans-serif`;
@@ -637,7 +672,7 @@ if (capVideo) {
     const row = e.target.closest?.('#cap-lines li');
     if (!row || e.target.name !== 'text') return;
     capVideo.pause();
-    capVideo.currentTime = Number(row.querySelector('input[name="start"]').value) + 0.01;
+    capVideo.currentTime = Number(field(row, 'start').value) + 0.01;
   };
   document.addEventListener('focusin', jumpToRow);
   document.addEventListener('click', jumpToRow);
@@ -648,12 +683,65 @@ if (capVideo) {
     if (button.hasAttribute('data-cap-remove')) {
       button.closest('li').remove();
       showCaption();
-    } else if (button.dataset.capColor) {
-      document.getElementById('cap-color').value = button.dataset.capColor;
-      for (const s of document.querySelectorAll('[data-cap-color]')) s.classList.toggle('is-picked', s === button);
+    } else if (button.dataset.capColor || button.dataset.capHighlight) {
+      // Dva reda boja: boja teksta i boja izgovorene riječi.
+      const kind = button.dataset.capColor ? 'capColor' : 'capHighlight';
+      document.getElementById(kind === 'capColor' ? 'cap-color' : 'cap-highlight').value = button.dataset[kind];
+      for (const s of button.parentElement.querySelectorAll('.swatch')) s.classList.toggle('is-picked', s === button);
       showCaption();
     }
   });
+}
+
+// ── Paket za objavu: kopiranje polja i brojači znakova ────
+document.addEventListener('click', async (e) => {
+  const button = e.target.closest('button[data-copy]');
+  if (!button) return;
+  let text = document.getElementById(button.dataset.copy).value.trim();
+  if (button.dataset.copyWith) {
+    // Hashtagovi idu ispod opisa, odvojeni praznim redom.
+    const extra = document.getElementById(button.dataset.copyWith).value.trim();
+    if (extra) text = text ? `${text}\n\n${extra}` : extra;
+  }
+  const label = button.dataset.label || (button.dataset.label = button.textContent);
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = 'Copied';
+  } catch {
+    button.textContent = 'Could not copy';
+  }
+  setTimeout(() => (button.textContent = label), 1500);
+});
+
+for (const counter of document.querySelectorAll('[data-count]')) {
+  const input = document.getElementById(counter.dataset.count);
+  const update = () => (counter.textContent = `${input.value.length}/${counter.dataset.max}`);
+  input.addEventListener('input', update);
+  update();
+}
+
+// Dugme za skidanje prati izabrani thumbnail.
+const kitThumbDownload = document.getElementById('kit-thumb-download');
+if (kitThumbDownload) {
+  const update = () => {
+    const picked = document.querySelector('input[name="thumbnail"]:checked');
+    kitThumbDownload.hidden = !picked || !picked.value;
+    if (picked && picked.value) kitThumbDownload.href = `/thumbnails/${picked.value}/file?download=1`;
+  };
+  document.addEventListener('change', (e) => e.target.name === 'thumbnail' && update());
+  update();
+}
+
+// ── „Napravi sve“: izbor koraka nakon rezanja pamti se u pregledniku ──
+const chainFields = [...document.querySelectorAll('[data-remember]')];
+for (const field of chainFields) {
+  const key = `cutdeck:${field.dataset.remember}`;
+  const saved = localStorage.getItem(key);
+  if (saved !== null && !field.disabled) {
+    if (field.type === 'checkbox') field.checked = saved === '1';
+    else if ([...field.options].some((o) => o.value === saved)) field.value = saved;
+  }
+  field.addEventListener('change', () => localStorage.setItem(key, field.type === 'checkbox' ? (field.checked ? '1' : '0') : field.value));
 }
 
 // Pregled Shorta dok je miš iznad njega

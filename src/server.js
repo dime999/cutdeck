@@ -13,6 +13,15 @@ const views = require('./views');
 
 const LOCAL_USER = db.localUser();
 
+// Trajna podešavanja korisnika, čuvana kao JSON.
+function getSetting(userId, key, fallback) {
+  const row = db.prepare('SELECT value FROM settings WHERE user_id=? AND key=?').get(userId, key);
+  return row ? JSON.parse(row.value) : fallback;
+}
+function setSetting(userId, key, value) {
+  db.prepare('INSERT INTO settings (user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value=excluded.value').run(userId, key, JSON.stringify(value));
+}
+
 // ── Mini router ───────────────────────────────────────────
 const routes = [];
 function route(method, pattern, handler) {
@@ -208,7 +217,11 @@ route(
     const moments = db.prepare('SELECT * FROM moments WHERE recording_id=? ORDER BY start_s').all(rec.id);
     const clips = db.prepare('SELECT * FROM clips WHERE recording_id=? AND user_id=? ORDER BY id DESC').all(rec.id, ctx.user.id);
     rec.hasThumb = fs.existsSync(studio.thumbPath('rec', rec.id));
-    html(ctx, views.recordingPage(ctx, { rec, moments, clips: withThumbs(clips), ffmpegOk: media.isAvailable() }));
+    const bumpers = db.prepare('SELECT id, name, duration FROM bumpers WHERE user_id=? ORDER BY name COLLATE NOCASE').all(ctx.user.id);
+    html(
+      ctx,
+      views.recordingPage(ctx, { rec, moments, clips: markPublished('clip', withThumbs(clips)), bumpers, captionsProblem: media.transcribeProblem(), ffmpegOk: media.isAvailable() })
+    );
   }
 );
 
@@ -303,8 +316,26 @@ route(
     if (!media.LAYOUTS.some(([id]) => id === layout)) return fail('Choose a layout.');
 
     const title = (form.get('title') || '').trim().slice(0, 100) || `${path.parse(rec.name).name} ${views.fmtTime(start)}`.slice(0, 100);
-    studio.createClip(rec, { title, start, end: Math.min(end, rec.duration), layout });
-    flash(ctx, 'ok', `Short “${title}” is being created.`);
+    // „Napravi sve“: titlovi u zadnjem korištenom stilu, pa intro i outro, bez daljih klikova.
+    const bumperId = (field) => {
+      const b = form.get(field) ? db.prepare('SELECT id FROM bumpers WHERE id=? AND user_id=?').get(Number(form.get(field)), ctx.user.id) : null;
+      return b ? b.id : null;
+    };
+    const captions = form.get('auto_captions') === '1' && !media.transcribeProblem();
+    const intro = bumperId('auto_intro');
+    const outro = bumperId('auto_outro');
+    const followup =
+      captions || intro || outro ? { captions, style: getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE), intro, outro, title } : null;
+    studio.createClip(rec, { title, start, end: Math.min(end, rec.duration), layout, followup });
+    const steps = [captions && 'captions', intro && 'the intro', outro && 'the outro'].filter(Boolean);
+    const list = steps.length > 1 ? `${steps.slice(0, -1).join(', ')} and ${steps[steps.length - 1]}` : steps[0];
+    flash(
+      ctx,
+      'ok',
+      followup
+        ? `Short “${title}” is being created, and ${list} will be added without further clicks. The finished result appears under ${intro || outro ? 'Videos' : 'Shorts'}.`
+        : `Short “${title}” is being created.`
+    );
     redirect(ctx, back);
   }
 );
@@ -314,7 +345,7 @@ route(
   '/shorts',
   (ctx) => {
     const clips = db.prepare('SELECT * FROM clips WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
-    html(ctx, views.shortsPage(ctx, { clips: withThumbs(clips), ffmpegOk: media.isAvailable() }));
+    html(ctx, views.shortsPage(ctx, { clips: markPublished('clip', withThumbs(clips)), ffmpegOk: media.isAvailable() }));
   }
 );
 
@@ -342,6 +373,7 @@ route(
     fs.rm(clip.path, { force: true }, () => {});
     fs.rm(studio.thumbPath('clip', clip.id), { force: true }, () => {});
     db.prepare('DELETE FROM clips WHERE id=?').run(clip.id);
+    deleteKit(ctx.user.id, 'clip', clip.id);
     flash(ctx, 'ok', 'The Short has been deleted.');
     redirect(ctx, back);
   }
@@ -404,6 +436,8 @@ route('POST', '/clips/:id/captions', async (ctx) => {
   const starts = form.getAll('start');
   const ends = form.getAll('end');
   const texts = form.getAll('text');
+  const keys = form.getAll('key');
+  const previous = JSON.parse(captions.lines); // za izmjerena vremena riječi
   if (starts.length !== texts.length || ends.length !== texts.length || texts.length > MAX_CAPTION_LINES) return fail('The captions could not be read. Reload the page and try again.');
   const length = clip.end_s - clip.start_s;
   const lines = [];
@@ -413,7 +447,7 @@ route('POST', '/clips/:id/captions', async (ctx) => {
     const start = Number(starts[i]);
     const end = Number(ends[i]);
     if (!(start >= 0) || !(end > start) || end > length + 0.5) return fail(`Check the times of “${text}”: the end must be after the start and inside the video.`);
-    lines.push({ start, end, text });
+    lines.push({ start, end, text, words: (previous[Number(keys[i])] || {}).words });
   }
   const style = {
     font: media.CAPTION_FONTS.some(([f]) => f === form.get('font')) ? form.get('font') : media.DEFAULT_CAPTION_STYLE.font,
@@ -421,9 +455,12 @@ route('POST', '/clips/:id/captions', async (ctx) => {
     color: /^#[0-9a-f]{6}$/i.test(form.get('color') || '') ? form.get('color') : media.DEFAULT_CAPTION_STYLE.color,
     position: media.CAPTION_POSITIONS.includes(form.get('position')) ? form.get('position') : media.DEFAULT_CAPTION_STYLE.position,
     upper: form.get('upper') === '1',
+    // Prazno znači bez isticanja izgovorene riječi.
+    highlight: form.get('highlight_on') === '1' && /^#[0-9a-f]{6}$/i.test(form.get('highlight') || '') ? form.get('highlight') : '',
   };
   const tidy = media.tidyLines(lines);
   db.prepare('UPDATE captions SET lines=?, style=? WHERE id=?').run(JSON.stringify(tidy), JSON.stringify(style), captions.id);
+  setSetting(ctx.user.id, 'caption_style', style); // isti stil se koristi kad se titlovi dodaju automatski
 
   if (form.get('action') !== 'render') {
     flash(ctx, 'ok', 'The captions have been saved.');
@@ -605,7 +642,7 @@ function exportSource(userId, kind, id) {
 route('GET', '/videos', (ctx) => {
   const videos = db.prepare('SELECT * FROM exports WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
   for (const v of videos) v.hasThumb = fs.existsSync(studio.thumbPath('video', v.id));
-  html(ctx, views.videosPage(ctx, { videos, ffmpegOk: media.isAvailable() }));
+  html(ctx, views.videosPage(ctx, { videos: markPublished('video', videos), ffmpegOk: media.isAvailable() }));
 });
 
 route('GET', '/videos/new', (ctx) => {
@@ -723,8 +760,83 @@ route('POST', '/videos/:id/delete', (ctx) => {
   fs.rm(video.path, { force: true }, () => {});
   fs.rm(studio.thumbPath('video', video.id), { force: true }, () => {});
   db.prepare('DELETE FROM exports WHERE id=?').run(video.id);
+  deleteKit(ctx.user.id, 'video', video.id);
   flash(ctx, 'ok', 'The video has been deleted.');
   redirect(ctx, '/videos');
+});
+
+// ── Rute: paket za objavu ─────────────────────────────────
+// Naslov, opis, hashtagovi, tagovi i thumbnail za jedan video, spremni za kopiranje u YouTube Studio.
+function kitItem(userId, kind, id) {
+  if (kind === 'clip') {
+    const c = db.prepare("SELECT * FROM clips WHERE id=? AND user_id=? AND status='ready'").get(id, userId);
+    return c && { kind, id: c.id, name: c.title.replace(/ \(captions\)$/, ''), file: `/clips/${c.id}/file`, poster: `/clips/${c.id}/thumb`, vertical: true, recordingId: c.recording_id, back: '/shorts' };
+  }
+  if (kind === 'video') {
+    const v = db.prepare("SELECT * FROM exports WHERE id=? AND user_id=? AND status='ready'").get(id, userId);
+    return v && { kind, id: v.id, name: v.title, file: `/videos/${v.id}/file`, poster: `/videos/${v.id}/thumb`, vertical: v.height > v.width, recordingId: null, back: '/videos' };
+  }
+  if (kind === 'recording') {
+    const r = db.prepare("SELECT * FROM recordings WHERE id=? AND user_id=? AND hidden=0 AND status='ready'").get(id, userId);
+    return r && { kind, id: r.id, name: path.parse(r.name).name, file: `/recordings/${r.id}/file`, poster: `/recordings/${r.id}/thumb`, vertical: r.height > r.width, recordingId: r.id, back: `/recordings/${r.id}` };
+  }
+  return null;
+}
+
+// Označava redove za koje je u paketu za objavu zabilježeno da su objavljeni.
+function markPublished(kind, rows) {
+  const stmt = db.prepare('SELECT published_at FROM kits WHERE user_id=? AND kind=? AND item_id=?');
+  for (const row of rows) row.published = Boolean((stmt.get(row.user_id, kind, row.id) || {}).published_at);
+  return rows;
+}
+
+const deleteKit = (userId, kind, id) => db.prepare('DELETE FROM kits WHERE user_id=? AND kind=? AND item_id=?').run(userId, kind, id);
+
+route('GET', '/publish/:kind/:id', (ctx) => {
+  const item = kitItem(ctx.user.id, ctx.params.kind, Number(ctx.params.id));
+  if (!item) return html(ctx, views.errorPage(ctx, 404, 'This video does not exist or is not ready yet.'), 404);
+  const saved = db.prepare('SELECT * FROM kits WHERE user_id=? AND kind=? AND item_id=?').get(ctx.user.id, item.kind, item.id);
+  const defaults = getSetting(ctx.user.id, 'kit_defaults', {});
+  const kit = saved || {
+    title: item.name.slice(0, 100),
+    description: defaults.description || '',
+    hashtags: defaults.hashtags ?? (item.vertical ? '#Shorts' : ''),
+    tags: defaults.tags || '',
+    thumbnail_id: null,
+    published_at: null,
+  };
+  // Thumbnailovi istog snimka idu prvi.
+  const thumbnails = item.vertical
+    ? []
+    : db.prepare('SELECT id, title FROM thumbnails WHERE user_id=? ORDER BY (recording_id IS ?) DESC, id DESC LIMIT 60').all(ctx.user.id, item.recordingId);
+  html(ctx, views.kitPage(ctx, { item, kit, thumbnails, isNew: !saved }));
+});
+
+route('POST', '/publish/:kind/:id', async (ctx) => {
+  const item = kitItem(ctx.user.id, ctx.params.kind, Number(ctx.params.id));
+  if (!item) return html(ctx, views.errorPage(ctx, 404, 'This video does not exist or is not ready yet.'), 404);
+  const form = await readForm(ctx.req);
+  const text = (name, max) => (form.get(name) || '').replace(/\r\n/g, '\n').trim().slice(0, max);
+  const kit = { title: text('title', 100), description: text('description', 5000), hashtags: text('hashtags', 500), tags: text('tags', 500) };
+  const thumb = form.get('thumbnail') ? db.prepare('SELECT id FROM thumbnails WHERE id=? AND user_id=?').get(Number(form.get('thumbnail')), ctx.user.id) : null;
+  const before = db.prepare('SELECT published_at FROM kits WHERE user_id=? AND kind=? AND item_id=?').get(ctx.user.id, item.kind, item.id);
+  const publishedAt = form.get('published') === '1' ? (before && before.published_at) || db.now() : null;
+
+  db.prepare(
+    `INSERT INTO kits (user_id, kind, item_id, title, description, hashtags, tags, thumbnail_id, published_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, kind, item_id) DO UPDATE SET
+       title=excluded.title, description=excluded.description, hashtags=excluded.hashtags, tags=excluded.tags,
+       thumbnail_id=excluded.thumbnail_id, published_at=excluded.published_at, updated_at=excluded.updated_at`
+  ).run(ctx.user.id, item.kind, item.id, kit.title, kit.description, kit.hashtags, kit.tags, thumb ? thumb.id : null, publishedAt, db.now());
+
+  if (form.get('action') === 'defaults') {
+    setSetting(ctx.user.id, 'kit_defaults', { description: kit.description, hashtags: kit.hashtags, tags: kit.tags });
+    flash(ctx, 'ok', 'Saved. New kits will start with this description, these hashtags and these tags.');
+  } else {
+    flash(ctx, 'ok', 'The publish kit has been saved.');
+  }
+  redirect(ctx, `/publish/${item.kind}/${item.id}`);
 });
 
 // ── Javne stranice ────────────────────────────────────────

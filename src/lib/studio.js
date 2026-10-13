@@ -42,12 +42,13 @@ function scan(userId) {
   return added;
 }
 
-function createClip(rec, { title, start, end, layout }) {
+function createClip(rec, { title, start, end, layout, followup = null }) {
+  const file = path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`);
   const r = db
     .prepare(
-      'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, followup, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`), db.now());
+    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, followup ? JSON.stringify(followup) : null, db.now());
   tick();
   return Number(r.lastInsertRowid);
 }
@@ -139,6 +140,7 @@ async function renderClip(id) {
     await media.thumbnail(clip.path, thumbPath('clip', id), Math.min(1, length / 2), 360).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
     db.prepare("UPDATE clips SET status='ready', progress=100, size=? WHERE id=?").run(fs.statSync(clip.path).size, id);
     console.log(`[studio] ✔ Short "${clip.title}"`);
+    advanceClip(id);
   } catch (err) {
     console.warn(`[studio] ✘ Short "${clip.title}": ${err.message}`);
     fs.rm(clip.path, { force: true }, () => {});
@@ -256,19 +258,31 @@ async function transcribeClip(id) {
     const lines = await media.transcribe(clip.path, clip.end_s - clip.start_s, progressSetter('captions', id));
     db.prepare("UPDATE captions SET status='ready', progress=100, lines=? WHERE id=?").run(JSON.stringify(lines), id);
     console.log(`[studio] ✔ captions for "${clip.title}" (${lines.length} lines)`);
+    const next = readFollowup(clip);
+    if (next && next.captions) {
+      // Lanac: titlovi se upisuju bez pregleda, u zadanom stilu. Ako govora nema, ide se dalje bez njih.
+      db.prepare('UPDATE captions SET style=? WHERE id=?').run(JSON.stringify(next.style || {}), id);
+      if (lines.length) {
+        clearFollowup(clip.id);
+        createCaptionedClip(clip, lines, next.style, { ...next, captions: false });
+      } else finishChain(clip, next);
+    }
   } catch (err) {
     console.warn(`[studio] ✘ captions for "${clip.title}": ${err.message}`);
     fail(err.message);
+    // Lanac se ne prekida zbog titlova: intro i outro se dodaju i bez njih.
+    const next = readFollowup(clip);
+    if (next && next.captions) finishChain(clip, next);
   }
 }
 
 /** Pravi novi Short: kopiju zadanog sa titlovima upisanim u sliku. */
-function createCaptionedClip(clip, lines, style) {
+function createCaptionedClip(clip, lines, style, followup = null) {
   const subtitles = media.buildAss(lines, style, media.SHORT_SIZE);
   const r = db
     .prepare(
-      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, source_clip_id, subtitles, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, source_clip_id, subtitles, followup, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       clip.user_id,
@@ -281,10 +295,40 @@ function createCaptionedClip(clip, lines, style) {
       path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`),
       clip.id,
       subtitles,
+      followup ? JSON.stringify(followup) : null,
       db.now()
     );
   tick();
   return Number(r.lastInsertRowid);
+}
+
+// ── Lanac „napravi sve“ ───────────────────────────────────
+// Short može nositi upute šta slijedi kad bude gotov (kolona followup):
+// { captions, style, intro, outro, title }. Svaki korak ih predaje sljedećem.
+const readFollowup = (clip) => (clip && clip.followup ? JSON.parse(clip.followup) : null);
+const clearFollowup = (clipId) => db.prepare('UPDATE clips SET followup=NULL WHERE id=?').run(clipId);
+
+/** Short je gotov: pokreće sljedeći korak lanca, ako ga ima. */
+function advanceClip(clipId) {
+  const clip = db.prepare('SELECT * FROM clips WHERE id=?').get(clipId);
+  const next = readFollowup(clip);
+  if (!next) return;
+  if (next.captions && !clip.subtitles && !media.transcribeProblem()) return requestCaptions(clip.id);
+  finishChain(clip, next);
+}
+
+/** Posljednji korak lanca: intro i outro, ako su traženi i još postoje. */
+function finishChain(clip, next) {
+  clearFollowup(clip.id);
+  const bumper = (id) => (id ? db.prepare('SELECT id, name FROM bumpers WHERE id=? AND user_id=?').get(id, clip.user_id) : null);
+  const intro = bumper(next.intro);
+  const outro = bumper(next.outro);
+  if (!intro && !outro) return;
+  const part = (b) => ({ kind: 'bumper', id: b.id, name: b.name });
+  createExport(clip.user_id, {
+    title: next.title || clip.title,
+    parts: [intro && part(intro), { kind: 'clip', id: clip.id, name: clip.title, main: true }, outro && part(outro)].filter(Boolean),
+  });
 }
 
 module.exports = { MIN_CLIP, MAX_CLIP, thumbPath, scan, createClip, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, start, tick };

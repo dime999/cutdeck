@@ -132,6 +132,8 @@ function timeline(rec, moments, { clips = [], interactive = false } = {}) {
   </div>`;
 }
 
+const PUBLISHED = '<span class="chip ok">Published</span>';
+
 function shortTiles(clips, { from = '' } = {}) {
   const tiles = clips
     .map((c) => {
@@ -149,13 +151,14 @@ function shortTiles(clips, { from = '' } = {}) {
       return `<li class="short" data-poll-key="clip:${c.id}" data-state="${h(c.status)}">
       ${frame}
       <strong class="short-title">${h(c.title)}</strong>
-      ${meta(`${h(c.recording_name)} at ${fmtTime(c.start_s)}`, c.size ? fmtSize(c.size) : '')}
+      ${meta(c.published ? PUBLISHED : '', `${h(c.recording_name)} at ${fmtTime(c.start_s)}`, c.size ? fmtSize(c.size) : '')}
       <div class="short-actions">
         ${
           c.status === 'ready'
             ? `<a class="button primary" href="/clips/${c.id}/file?download=1">Download</a>
-               <a class="button" href="/videos/new?clip=${c.id}">Add intro and outro</a>
-               <a class="button" href="/clips/${c.id}/captions">Add captions</a>`
+               <a class="button" href="/publish/clip/${c.id}">Publish kit</a>
+               <a class="button" href="/clips/${c.id}/captions">Captions</a>
+               <a class="button" href="/videos/new?clip=${c.id}">Intro and outro</a>`
             : ''
         }
         ${
@@ -231,7 +234,8 @@ ${studioPoll(busy && ffmpegOk)}
   );
 }
 
-function recordingPage(ctx, { rec, moments, clips, ffmpegOk }) {
+function recordingPage(ctx, { rec, moments, clips, bumpers, captionsProblem, ffmpegOk }) {
+  const bumperOptions = bumpers.map((b) => `<option value="${b.id}">${h(b.name)} (${fmtTime(b.duration)})</option>`).join('');
   const [label, cls] = REC_STATUS[rec.status] || [rec.status, 'muted'];
   let analysis;
   if (rec.status === 'pending' || rec.status === 'analyzing') {
@@ -281,7 +285,8 @@ ${
   <h1>${h(rec.name)}</h1>
   <div class="head-actions">
     ${rec.status === 'ready' ? `<a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">Create thumbnail</a>
-    <a class="button" href="/videos/new?recording=${rec.id}">Add intro and outro</a>` : ''}
+    <a class="button" href="/videos/new?recording=${rec.id}">Add intro and outro</a>
+    <a class="button" href="/publish/recording/${rec.id}">Publish kit</a>` : ''}
     <a class="button" href="/recordings">All recordings</a>
   </div>
 </div>
@@ -310,7 +315,12 @@ ${ffmpegNotice(ffmpegOk)}
         <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
       </label>
       <label>Title <span class="muted">(optional)</span><input name="title" maxlength="100"></label>
-      <p class="muted small">3 to 180 seconds. The result is a vertical 1080×1920 video.</p>
+      <h2>Then, without more clicks</h2>
+      <label class="check"><input type="checkbox" name="auto_captions" value="1" data-remember="auto-captions"${captionsProblem ? ' disabled' : ''}> Add captions from the voice</label>
+      ${captionsProblem ? `<p class="muted small">Captions are not available yet: ${h(captionsProblem)}</p>` : ''}
+      <label>Intro<select name="auto_intro" data-remember="auto-intro"><option value="">No intro</option>${bumperOptions}</select></label>
+      <label>Outro<select name="auto_outro" data-remember="auto-outro"><option value="">No outro</option>${bumperOptions}</select></label>
+      <p class="muted small">3 to 180 seconds, vertical 1080×1920. Captions use the style you last saved on a captions page. With an intro or outro the finished video appears under Videos; otherwise under Shorts.</p>
       <button class="primary big">Create Short</button>
     </form>
   </section>
@@ -584,13 +594,13 @@ function videosPage(ctx, { videos, ffmpegOk }) {
         frame = `<div class="thumb-frame is-busy"><p>${v.status === 'rendering' ? 'Creating…' : 'Waiting its turn'}</p>${v.status === 'rendering' ? progressBar(v.progress) : ''}</div>`;
       }
       let actions;
-      if (v.status === 'ready') actions = `<a class="button primary" href="/videos/${v.id}/file?download=1">Download</a>`;
+      if (v.status === 'ready') actions = `<a class="button primary" href="/videos/${v.id}/file?download=1">Download</a>\n        <a class="button" href="/publish/video/${v.id}">Publish kit</a>`;
       else if (v.status === 'rendering') actions = `<form method="post" action="/videos/${v.id}/cancel"><button>Cancel</button></form>`;
       else actions = '';
       return `<li class="thumb" data-poll-key="video:${v.id}" data-state="${h(v.status)}">
       ${frame}
       <strong class="short-title">${h(v.title)}</strong>
-      ${meta(parts, v.size ? fmtSize(v.size) : '', v.width ? `${v.width}×${v.height}` : '')}
+      ${meta(v.published ? PUBLISHED : '', parts, v.size ? fmtSize(v.size) : '', v.width ? `${v.width}×${v.height}` : '')}
       <div class="short-actions">
         ${actions}
         ${
@@ -625,6 +635,8 @@ ${studioPoll(busy && ffmpegOk)}
 function captionsPage(ctx, { clip, captions, problem }) {
   const status = captions ? captions.status : 'none';
   const style = { ...DEFAULT_CAPTION_STYLE, ...(captions ? JSON.parse(captions.style || '{}') : {}) };
+  // Kad je isticanje isključeno, izbor boje i dalje nudi zadanu.
+  const highlightColor = style.highlight || DEFAULT_CAPTION_STYLE.highlight;
   const select = (name, label, options) =>
     `<label>${label}<select name="${name}" id="cap-${name}">${options
       .map(([value, text]) => `<option value="${h(value)}"${style[name] === value ? ' selected' : ''}>${h(text)}</option>`)
@@ -653,6 +665,14 @@ function captionsPage(ctx, { clip, captions, problem }) {
     <input type="hidden" name="color" id="cap-color" value="${h(style.color)}">
   </div>
   <label class="check"><input type="checkbox" name="upper" id="cap-upper" value="1"${style.upper ? ' checked' : ''}> Write the captions in capitals</label>
+  <label class="check"><input type="checkbox" name="highlight_on" id="cap-highlight-on" value="1"${style.highlight ? ' checked' : ''}> Highlight each word as it is spoken</label>
+  <div>
+    <span class="field-label">Highlight color</span>
+    <div class="swatches" role="group" aria-label="Color of the spoken word">
+      ${THUMB_COLORS.map(([c, name]) => `<button type="button" class="swatch${c === highlightColor ? ' is-picked' : ''}" data-cap-highlight="${c}" style="background:${c}" title="${name}" aria-label="${name}"></button>`).join('')}
+    </div>
+    <input type="hidden" name="highlight" id="cap-highlight" value="${h(highlightColor)}">
+  </div>
 
   <h2>Lines</h2>
   ${
@@ -660,11 +680,12 @@ function captionsPage(ctx, { clip, captions, problem }) {
       ? `<p class="muted small">Fix any word that was heard wrong. The two numbers are the seconds when a line appears and disappears. Select a line to jump to it in the video.</p>
   <ol class="cap-lines" id="cap-lines">${lines
           .map(
-            (l) => `<li>
+            (l, i) => `<li data-words="${h(JSON.stringify(l.words || []))}">
       <input type="number" name="start" value="${l.start}" min="0" step="0.01" aria-label="Appears at, in seconds">
       <input type="number" name="end" value="${l.end}" min="0" step="0.01" aria-label="Disappears at, in seconds">
       <input name="text" value="${h(l.text)}" maxlength="120" aria-label="Caption text">
       <button type="button" class="danger-outline" data-cap-remove aria-label="Remove this line" title="Remove this line">×</button>
+      <input type="hidden" name="key" value="${i}">
     </li>`
           )
           .join('')}</ol>`
@@ -704,6 +725,82 @@ ${generate(status === 'failed' ? 'Try again' : 'Generate captions')}`;
   <section class="card" id="live-captions" data-live data-rev="${h(status)}" data-poll-key="captions:${clip.id}" data-state="${h(status)}">
     ${panel}
     ${studioPoll(busy && !problem)}
+  </section>
+</div>`
+  );
+}
+
+// ── Paket za objavu ───────────────────────────────────────
+function kitPage(ctx, { item, kit, thumbnails, isNew }) {
+  const counter = (id, max) => `<span class="muted" data-count="${id}" data-max="${max}"></span>`;
+  const copy = (id, label = 'Copy', withId = '') => `<button type="button" data-copy="${id}"${withId ? ` data-copy-with="${withId}"` : ''}>${label}</button>`;
+  let thumbnail;
+  if (item.vertical) {
+    thumbnail = '<p class="muted small">A Short takes its thumbnail from a frame of the video, so there is no picture to upload.</p>';
+  } else if (thumbnails.length) {
+    thumbnail = `<div>
+      <span class="field-label">Thumbnail</span>
+      <div class="kit-thumbs">
+        <label class="kit-thumb"><input type="radio" name="thumbnail" value=""${kit.thumbnail_id ? '' : ' checked'}><span>None</span></label>
+        ${thumbnails
+          .map(
+            (t) =>
+              `<label class="kit-thumb" title="${h(t.title)}"><input type="radio" name="thumbnail" value="${t.id}"${t.id === kit.thumbnail_id ? ' checked' : ''}><img src="/thumbnails/${t.id}/file" alt="${h(t.title)}" loading="lazy"></label>`
+          )
+          .join('')}
+      </div>
+      <a class="button" id="kit-thumb-download" href="#" hidden>Download thumbnail</a>
+    </div>`;
+  } else {
+    thumbnail = `<p class="muted small">No thumbnails yet. ${
+      item.recordingId ? `<a href="/recordings/${item.recordingId}/thumbnail">Create one from the recording</a>` : 'Open a recording and select “Create thumbnail”'
+    }, then come back to pick it here.</p>`;
+  }
+
+  return layout(
+    ctx,
+    'Publish kit',
+    `<div class="page-head">
+  <h1>Publish kit</h1>
+  <div class="head-actions">
+    <a class="button" href="https://studio.youtube.com" target="_blank" rel="noopener">Open YouTube Studio</a>
+    <a class="button" href="${item.back}">Back</a>
+  </div>
+</div>
+<div class="cap-layout${item.vertical ? '' : ' kit-wide'}">
+  <section class="card">
+    <p class="form-source"><strong>${h(item.name)}</strong></p>
+    <video class="kit-video" src="${item.file}" poster="${item.poster}" controls preload="none" playsinline></video>
+    <a class="button primary" href="${item.file}?download=1">Download video</a>
+  </section>
+  <section class="card">
+    <form method="post" action="/publish/${item.kind}/${item.id}" class="stack">
+      <p class="muted small">Write the text once, then copy each field into YouTube Studio. Nothing is uploaded from here.${isNew ? ' This kit has not been saved yet.' : ''}</p>
+      <div>
+        <label for="kit-title">Title ${counter('kit-title', 100)}</label>
+        <div class="row"><input id="kit-title" name="title" maxlength="100" value="${h(kit.title)}">${copy('kit-title')}</div>
+      </div>
+      <div>
+        <label for="kit-description">Description ${counter('kit-description', 5000)}</label>
+        <textarea id="kit-description" name="description" rows="7" maxlength="5000">${h(kit.description)}</textarea>
+      </div>
+      <div>
+        <label for="kit-hashtags">Hashtags <span class="muted">(added under the description when you copy it)</span></label>
+        <input id="kit-hashtags" name="hashtags" maxlength="500" value="${h(kit.hashtags)}" placeholder="#GTA6 #gaming">
+        <p class="kit-copy">${copy('kit-description', 'Copy description and hashtags', 'kit-hashtags')}</p>
+      </div>
+      <div>
+        <label for="kit-tags">Tags <span class="muted">(separated by commas)</span> ${counter('kit-tags', 500)}</label>
+        <div class="row"><input id="kit-tags" name="tags" maxlength="500" value="${h(kit.tags)}" placeholder="gta 6, gameplay, heist">${copy('kit-tags')}</div>
+      </div>
+      ${thumbnail}
+      <label class="check"><input type="checkbox" name="published" value="1"${kit.published_at ? ' checked' : ''}> I have published this on YouTube</label>
+      <div class="cap-actions">
+        <button class="primary" name="action" value="save">Save</button>
+        <button name="action" value="defaults">Save and reuse for new kits</button>
+      </div>
+      <p class="muted small">“Save and reuse” also keeps the description, hashtags and tags as the starting point of every new kit.</p>
+    </form>
   </section>
 </div>`
   );
@@ -783,6 +880,7 @@ module.exports = {
   videoNewPage,
   videoMergePage,
   captionsPage,
+  kitPage,
   videosPage,
   privacyPage,
   termsPage,

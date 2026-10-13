@@ -11,7 +11,9 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Pravi thumbnail (JPG 1280×720) od kadra iz snimka, sa tekstom i doradom slike.
 - Dodaje intro i outro na cijeli snimak ili na Short i pravi gotov video.
 - Spaja više videa (snimke, Shorts, intro i outro klipove) u jedan, redom koji zadaš.
-- Pravi engleske titlove iz tvog govora u Shortu i upisuje ih u sliku.
+- Pravi engleske titlove iz tvog govora u Shortu i upisuje ih u sliku, sa isticanjem riječi koja se izgovara.
+- Jednim klikom od izabranog dijela snimka pravi Short s titlovima, introm i outrom.
+- Priprema paket za objavu: naslov, opis, hashtagove, tagove i thumbnail, spremne za kopiranje u YouTube Studio.
 - Nema prijave: aplikacija je za jednog korisnika i dostupna je samo sa računara na kojem radi.
 
 Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga sam kroz YouTube Studio.
@@ -42,6 +44,8 @@ Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga s
    Dio možeš izabrati i sam: povuci mišem preko trake, pa izbor pomjeri ili mu skrati rubove. Dugmad **15 s, 30 s, 45 s, 1 min** postave dužinu, a zum uveća traku za precizan rez.
 4. Izaberi raspored i klikni **Create Short**.
 5. Gotov Short je na stranici **Shorts**: možeš ga pogledati i skinuti dugmetom **Download**.
+
+**Sve jednim klikom.** Ispod naslova u istoj formi možeš uključiti **Add captions from the voice** i izabrati intro i outro. Tada **Create Short** uradi sve redom: izreže Short, prepozna govor i upiše titlove (u stilu koji si zadnji put sačuvao na stranici titlova), pa doda intro i outro. Gotov rezultat je na stranici **Videos** ako ima intro ili outro, a inače na stranici **Shorts**. Izbor se pamti za sljedeći put. Međukoraci (Short bez titlova i Short s titlovima) ostaju na stranici Shorts.
 
 Prijedlozi se zasnivaju samo na glasnoći zvuka, pa ih uvijek pregledaj prije rezanja. Uklanjanje snimka sa liste ne briše fajl sa diska.
 
@@ -86,10 +90,20 @@ Prije toga napravi folder `data/models`. Za tačnije prepoznavanje možeš skinu
 1. Na stranici **Shorts** klikni **Add captions** na Shortu u kojem govoriš.
 2. Klikni **Generate captions** i sačekaj da aplikacija presluša Short.
 3. Ispravi pogrešno prepoznate riječi. Dva broja uz svaki red su sekunde kad se titl pojavi i nestane; klik na red premota video na njega, a **×** ga briše.
-4. Izaberi font, veličinu, boju i poziciju. Titl se kao pregled vidi preko videa.
+4. Izaberi font, veličinu, boju i poziciju. Uz **Highlight each word as it is spoken** riječ koja se upravo izgovara dobija drugu boju. Titl se kao pregled vidi preko videa.
 5. Klikni **Create Short with captions**. Nastaje kopija Shorta sa titlovima u slici, a original ostaje netaknut.
 
 Titlovi nastaju iz govora, ne iz zvuka igre. Prvi titl se ponekad pojavi nešto prije nego što govor počne, pa mu po potrebi pomjeri vrijeme.
+
+## Paket za objavu
+
+Aplikacija ne objavljuje na YouTube, ali ti pripremi sve što YouTube Studio traži.
+
+1. Na Shortu, videu ili snimku klikni **Publish kit**.
+2. Upiši naslov, opis, hashtagove i tagove. Uz svako polje je dugme **Copy**; opis se kopira zajedno sa hashtagovima.
+3. Za vodoravne videe izaberi thumbnail koji si napravio i skini ga dugmetom **Download thumbnail**.
+4. **Save and reuse for new kits** pamti opis, hashtagove i tagove kao početni tekst svakog novog paketa.
+5. Kad video objaviš, označi **I have published this on YouTube**; na pločici se pojavi oznaka **Published**.
 
 ## Gdje su podaci
 

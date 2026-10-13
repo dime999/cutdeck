@@ -125,6 +125,30 @@ CREATE TABLE IF NOT EXISTS captions (
   style      TEXT NOT NULL DEFAULT '{}',      -- JSON: font, size, color, position, upper
   created_at TEXT NOT NULL
 );
+
+-- Trajna podešavanja po korisniku (npr. zadani stil titlova, zadani tekst paketa za objavu)
+CREATE TABLE IF NOT EXISTS settings (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  key     TEXT NOT NULL,
+  value   TEXT NOT NULL,                       -- JSON
+  PRIMARY KEY (user_id, key)
+);
+
+-- Paket za objavu: tekst i thumbnail za jedan Short, video ili snimak
+CREATE TABLE IF NOT EXISTS kits (
+  id           INTEGER PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind         TEXT NOT NULL,                  -- clip | video | recording
+  item_id      INTEGER NOT NULL,
+  title        TEXT NOT NULL DEFAULT '',
+  description  TEXT NOT NULL DEFAULT '',
+  hashtags     TEXT NOT NULL DEFAULT '',
+  tags         TEXT NOT NULL DEFAULT '',
+  thumbnail_id INTEGER REFERENCES thumbnails(id) ON DELETE SET NULL,
+  published_at TEXT,
+  updated_at   TEXT NOT NULL,
+  UNIQUE (user_id, kind, item_id)
+);
 `);
 
 // Kolone dodane nakon što je tabela već mogla biti napravljena.
@@ -136,6 +160,8 @@ addColumn('recordings', 'waveform', 'TEXT');
 // Short sa titlovima: iz kojeg Shorta je nastao i sadržaj ASS fajla koji se upisuje u sliku.
 addColumn('clips', 'source_clip_id', 'INTEGER');
 addColumn('clips', 'subtitles', 'TEXT');
+// Lanac „napravi sve“: šta slijedi kad Short bude gotov (JSON), vidi studio.js.
+addColumn('clips', 'followup', 'TEXT');
 
 db.now = () => new Date().toISOString();
 
