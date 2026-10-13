@@ -413,6 +413,47 @@ a.short-frame:hover, a.thumb-frame:hover, a.short-frame:focus-visible, a.thumb-f
 .confirm p:empty { display: none; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.35rem; }
 
+/* ── Clipping ── */
+.lead { margin: -0.7rem 0 1.25rem; }
+.rec.camp { grid-template-columns: minmax(0, 1fr); }
+.rec.camp .meta { margin-bottom: 0; }
+.rec-head .button { height: 30px; padding: 0 0.7rem; font-size: 0.85rem; }
+.camp-new { margin-top: 1.25rem; }
+.camp-rules { margin: -0.9rem 0 1.25rem; }
+.camp-edit { margin-top: 1.5rem; }
+.camp-edit > summary { color: var(--text); font: 600 1.1rem var(--display); font-stretch: 87.5%; cursor: pointer; }
+.camp-edit[open] > summary { margin-bottom: 1rem; }
+h2 .chip { margin-left: 0.5rem; vertical-align: middle; }
+
+/* Transkript: lista redova kroz koju se traži i bira scena */
+.tr-tools { display: flex; align-items: flex-end; gap: 0.75rem; margin-bottom: 0.6rem; }
+.tr-search { flex: 1; margin: 0; }
+.tr-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.6rem; padding: 0.4rem 0.45rem 0.4rem 0.8rem; border: 1px solid var(--line-soft); border-left: 3px solid var(--sky); border-radius: var(--r-control); background: color-mix(in srgb, var(--sky) 7%, var(--panel)); }
+.tr-lines { max-height: 46vh; margin: 0; padding: 0; overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--r-control); background: var(--rail); list-style: none; scrollbar-width: thin; }
+.tr-lines li { display: flex; align-items: baseline; gap: 0.6rem; padding: 0.3rem 0.65rem 0.3rem 0.5rem; border-left: 3px solid transparent; cursor: pointer; }
+.tr-lines li:hover { background: var(--panel); }
+.tr-lines li.is-used { border-left-color: var(--ok); }
+.tr-lines li.is-playing { background: color-mix(in srgb, var(--amber) 11%, transparent); }
+.tr-lines li.is-active { border-left-color: var(--sky); background: color-mix(in srgb, var(--sky) 17%, transparent); }
+.tr-lines li.is-hidden { display: none; }
+.tr-time { justify-content: flex-start; min-width: 3.3rem; height: auto; padding: 0; border: 0; background: none; box-shadow: none; color: var(--muted); font: 500 0.8rem var(--display); font-variant-numeric: tabular-nums; }
+.tr-time:hover, .tr-time:active { background: none; color: var(--sky); transform: none; box-shadow: none; }
+.cl-hook { align-items: end; }
+.cl-hook button { height: 38px; padding: 0 0.6rem; font-size: 0.85rem; }
+
+/* Provjera pravila kampanje i tekst za objavu */
+.checks { display: grid; gap: 0.55rem; margin: 0 0 0.85rem; padding: 0; list-style: none; }
+.checks li { display: flex; align-items: flex-start; gap: 0.7rem; }
+.checks p { margin: 0; }
+.check-mark { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); font: 700 0.82rem var(--display); }
+.checks .is-bad .check-mark { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber); }
+.post-block { padding: 0.8rem 0.9rem; border: 1px solid var(--line-soft); border-radius: var(--r-control); background: #1f2124; }
+.post-block.is-posted { border-left: 3px solid var(--ok); }
+.post-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.45rem; }
+.post-head button { height: 28px; margin-left: auto; padding: 0 0.7rem; font-size: 0.84rem; }
+.post-block textarea { min-height: 3.4rem; margin: 0 0 0.6rem; color: var(--soft); resize: none; }
+.post-check { height: 38px; white-space: nowrap; }
+
 /* ── Tekstualne stranice ── */
 .prose { max-width: 720px; }
 .prose h2 { margin-top: 1.6rem; }

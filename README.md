@@ -15,6 +15,7 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Jednim klikom od izabranog dijela snimka pravi Short s titlovima, introm i outrom.
 - Reže cijeli snimak na Shorts zadane dužine, sa natpisom PART 1, PART 2… i titlovima.
 - Priprema paket za objavu: naslov, opis, hashtagove, tagove i thumbnail, spremne za kopiranje u YouTube Studio.
+- U odvojenoj sekciji **Clipping** pravi klipove tuđe epizode za clipping kampanje: transkript cijele epizode s pretragom, hook na početku, izbacivanje pauza, provjera pravila kampanje i tekst za objavu po platformama.
 - Nema prijave: aplikacija je za jednog korisnika i dostupna je samo sa računara na kojem radi.
 
 Aplikacija ne objavljuje ništa na YouTube. Gotov video skineš i postaviš ga sam kroz YouTube Studio.
@@ -121,6 +122,23 @@ Aplikacija ne objavljuje na YouTube, ali ti pripremi sve što YouTube Studio tra
 4. **Save and reuse for new kits** pamti opis, hashtagove i tagove kao početni tekst svakog novog paketa.
 5. Kad video objaviš, označi **I have published this on YouTube**; na pločici se pojavi oznaka **Published**.
 
+## Clipping (kampanje)
+
+Sekcija **Clipping** je odvojena od ostatka aplikacije i služi za kampanje u kojima klipaš tuđu epizodu po zadanim pravilima. Klipovi iz kampanje se ne pojavljuju na stranici **Shorts**.
+
+1. Kopiraj epizodu u `data/recordings` i klikni **Scan folder** na stranici **Recordings**.
+2. Na stranici **Campaigns** napravi kampanju: ime, epizoda, hashtagovi (npr. `#r3born`), nalog koji se taguje na svakoj platformi, riječi koje se ne smiju pojaviti (npr. `FaZe`) i najkraća dozvoljena dužina klipa.
+3. Otvori kampanju i klikni **Transcribe the episode**. Aplikacija presluša cijelu epizodu (treba isti model kao za titlove).
+4. U polje **Search what is said** upiši riječ ili frazu. Klik na red pusti to mjesto u playeru, a dugmad **Start here**, **End here** i **Use as hook** upišu ga u formu. Redovi koji su već u nekom klipu imaju zelenu crtu.
+5. Po želji zadaj **hook** (najjača sekunda ili dvije scene, koja se pušta prva) i ostavi uključeno **Cut out pauses in the talking**, koje izbacuje tišine duže od 0,6 s.
+6. Klikni **Create clip**. Titlovi dolaze iz transkripta i odmah su u slici. Ako se scena većim dijelom poklapa s klipom koji već imaš, aplikacija te upozori.
+7. Otvori gotov klip. **Campaign rules** pokazuje šta je u redu, a šta treba popraviti: dužina, titlovi, zabranjene riječi u naslovu, opisu i titlovima, te da li si napisao opis.
+8. Napiši kratak opis svojim riječima. Ispod dobiješ gotov tekst za YouTube Shorts, TikTok, Instagram Reels i X, svaki s pravim tagom i hashtagovima kampanje. Klikni **Copy**, objavi klip sam, pa označi **Posted** i po želji upiši link.
+
+Za drugačiji rez iste scene klikni **Make a variation** na klipu: forma se otvori s istim početkom i krajem, pa promijeni hook ili raspored.
+
+Aplikacija ne može provjeriti da li je snimak iz prave epizode, da li je klip prijavljen i u drugu kampanju, ni ko ti gleda videe. **Split into Shorts** ne koristi za kampanje: niz PART 1, PART 2… je isto što i objava cijele epizode, što kampanje zabranjuju.
+
 ## Gdje su podaci
 
 - `data/app.db` je baza (snimci, Shorts, thumbnailovi, klipovi i gotovi videi).
@@ -141,6 +159,8 @@ src/views.js         HTML stranice
 src/lib/media.js     ffmpeg: analiza zvuka, prijedlozi trenutaka, rezanje u 9:16, spajanje dijelova i titlovi
 src/lib/studio.js    skeniranje foldera sa snimcima i redovi poslova za analizu, rezanje i spajanje
 src/lib/db.js        SQLite šema (ugrađeni node:sqlite)
+src/clipping-*.js    rute i stranice sekcije Clipping
+src/lib/clipping.js  pravila kampanje, hook, izbacivanje pauza, tekst za objavu
 public/              CSS i JavaScript za preglednik
 ```
 

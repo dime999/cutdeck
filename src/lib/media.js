@@ -318,13 +318,10 @@ function groupWords(words) {
   return lines;
 }
 
-/**
- * Prepoznaje engleski govor u videu. Vraća redove [{start, end, text, words}] sa vremenima
- * u sekundama; `words` su riječi reda sa svojim vremenima, za isticanje izgovorene riječi.
- */
-async function transcribe(file, duration, onProgress, signal) {
+/** Prepoznaje engleski govor u videu. Vraća riječi [{start, end, text}] sa vremenima u sekundama. */
+async function recognizeWords(file, duration, onProgress, signal) {
   const out = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.json`);
-  // max_len=1 daje jedan zapis po riječi; u redove ih slaže groupWords.
+  // max_len=1 daje jedan zapis po riječi.
   const options = [`model=${filterPath(cfg.whisperModel)}`, 'language=en', 'queue=20', 'max_len=1', `destination=${filterPath(out)}`, 'format=json'];
   try {
     await run(
@@ -342,10 +339,18 @@ async function transcribe(file, duration, onProgress, signal) {
       if (!word || /^[[(].*[\])]$/.test(word)) continue;
       words.push({ start: item.start / 1000, end: item.end / 1000, text: word });
     }
-    return tidyLines(groupWords(words));
+    return words;
   } finally {
     fs.rm(out, { force: true }, () => {});
   }
+}
+
+/** Riječi složene u redove titlova [{start, end, text, words}]. */
+const linesFromWords = (words) => tidyLines(groupWords(words));
+
+/** Prepoznaje govor u videu i vraća ga kao redove titlova. */
+async function transcribe(file, duration, onProgress, signal) {
+  return linesFromWords(await recognizeWords(file, duration, onProgress, signal));
 }
 
 const assTime = (t) => {
@@ -423,6 +428,43 @@ function buildLabelAss({ text, position }, { width, height }) {
   ].join('\n');
 }
 
+/**
+ * Argumenti za klip složen iz više dijelova istog izvora (npr. hook, pa scena bez pauza).
+ * Dijelovi se režu i spajaju, pa se rezultat pretvara u vertikalni kadar i dobija titlove.
+ */
+function edlArgs({ input, output, edl, layout, overlayFile = null }) {
+  // Čita se samo raspon izvora koji dijelovi pokrivaju; vremena dijelova se računaju od njegovog početka.
+  const from = Math.min(...edl.map((p) => p.start));
+  const to = Math.max(...edl.map((p) => p.end));
+  const cuts = edl.map((p, i) => {
+    const range = `start=${(p.start - from).toFixed(3)}:end=${(p.end - from).toFixed(3)}`;
+    return `[0:v]trim=${range},setpts=PTS-STARTPTS[v${i}];[0:a:0]atrim=${range},asetpts=PTS-STARTPTS[a${i}]`;
+  });
+  const joined = `${edl.map((_, i) => `[v${i}][a${i}]`).join('')}concat=n=${edl.length}:v=1:a=1[cv][ca]`;
+  let frame = shortFilter(layout).replace('[0:v]', '[cv]');
+  if (overlayFile) frame = frame.replace(/\[v\]$/, `,ass=${filterPath(overlayFile)}[v]`);
+  return [
+    '-hide_banner', '-nostdin', '-v', 'error', '-y',
+    '-ss', from.toFixed(3), '-to', to.toFixed(3), '-i', input,
+    '-filter_complex', [...cuts, joined, frame].join(';'), '-map', '[v]', '-map', '[ca]',
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
+    '-progress', 'pipe:1', '-nostats', output,
+  ];
+}
+
+/** Pravi vertikalni klip iz dijelova izvora. `job.overlay` je sadržaj ASS fajla sa titlovima. */
+async function renderEdl(job, onProgress, signal) {
+  const overlayFile = job.overlay ? path.join(cfg.tmpDir, `clip-${crypto.randomBytes(8).toString('hex')}.ass`) : null;
+  if (overlayFile) fs.writeFileSync(overlayFile, job.overlay);
+  const length = job.edl.reduce((sum, p) => sum + (p.end - p.start), 0);
+  try {
+    await run(cfg.ffmpeg, edlArgs({ ...job, overlayFile }), progressParser(length, onProgress), signal);
+  } finally {
+    if (overlayFile) fs.rm(overlayFile, { force: true }, () => {});
+  }
+}
+
 /** Upisuje titlove (sadržaj ASS fajla) u sliku videa. Zvuk se prenosi bez promjene. */
 async function renderCaptioned({ input, output, subtitles, duration }, onProgress, signal) {
   const assFile = path.join(cfg.tmpDir, `captions-${crypto.randomBytes(8).toString('hex')}.ass`);
@@ -463,9 +505,13 @@ module.exports = {
   joinArgs,
   renderJoined,
   transcribeProblem,
+  recognizeWords,
+  linesFromWords,
   transcribe,
   tidyLines,
   buildAss,
   buildLabelAss,
   renderCaptioned,
+  edlArgs,
+  renderEdl,
 };

@@ -76,6 +76,8 @@ function layout(ctx, title, body) {
       ${nav('/videos', 'Videos', 'videos')}
       <p class="side-label">Assets</p>
       ${nav('/bumpers', 'Intros and outros', 'bumpers')}
+      <p class="side-label">Clipping</p>
+      ${nav('/clipping', 'Campaigns', 'kit')}
     </nav>
     <a class="side-activity" id="side-activity" href="/shorts" hidden><span class="spinner"></span><span id="side-activity-text"></span></a>
     <p class="side-foot"><a href="/privacy">Privacy</a><a href="/terms">Terms</a></p>
@@ -984,7 +986,16 @@ function errorPage(ctx, status, message) {
 
 module.exports = {
   h,
+  icon,
+  crumb,
+  menu,
+  emptyState,
+  meta,
+  layout,
   fmtTime,
+  fmtSize,
+  progressBar,
+  studioPoll,
   recordingsPage,
   recordingPage,
   shortsPage,

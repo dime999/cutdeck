@@ -83,7 +83,9 @@ updateBulk();
 const studioPoll = document.querySelector('[data-studio-poll]');
 if (studioPoll) {
   const id = studioPoll.dataset.studioPoll;
-  const statusUrl = `/api/studio/status${id ? `?recording=${id}` : ''}`;
+  // Stranica kampanje pita samo za svoje klipove.
+  const campaign = document.getElementById('clipping-form')?.action.match(/\/clipping\/(\d+)\//)?.[1] || location.pathname.match(/^\/clipping\/(\d+)$/)?.[1];
+  const statusUrl = `/api/studio/status${id ? `?recording=${id}` : campaign ? `?campaign=${campaign}` : ''}`;
 
   async function refreshLive() {
     const r = await fetch(location.href);
@@ -938,9 +940,9 @@ if (sideActivity) {
   async function refreshActivity() {
     if (document.hidden) return;
     try {
-      const r = await fetch('/api/studio/status');
+      const r = await fetch('/api/studio/status?all=1');
       if (!r.ok) return;
-      const count = { clip: 0, video: 0, rec: 0, captions: 0 };
+      const count = { clip: 0, video: 0, rec: 0, captions: 0, transcript: 0 };
       for (const item of (await r.json()).items) {
         if (WORKING.includes(item.status)) count[item.key.split(':')[0]]++;
       }
@@ -949,6 +951,7 @@ if (sideActivity) {
         count.captions && `captioning ${plural(count.captions, 'Short', 'Shorts')}`,
         count.video && `creating ${plural(count.video, 'video', 'videos')}`,
         count.rec && `analyzing ${plural(count.rec, 'recording', 'recordings')}`,
+        count.transcript && `transcribing ${plural(count.transcript, 'episode', 'episodes')}`,
       ].filter(Boolean);
       sideActivity.hidden = parts.length === 0;
       if (!parts.length) return;
@@ -985,6 +988,113 @@ document.addEventListener('click', (e) => {
 document.addEventListener('live:refresh', markLongDescriptions);
 window.addEventListener('resize', markLongDescriptions);
 markLongDescriptions();
+
+// ── Clipping: transkript, pretraga i forma za klip ────────
+const clippingForm = document.getElementById('clipping-form');
+if (clippingForm) {
+  const video = document.getElementById('clipping-player');
+  const get = (id) => document.getElementById(id);
+  const minSeconds = Number(clippingForm.dataset.min);
+  const used = JSON.parse(clippingForm.dataset.used || '[]');
+  const parseTime = (text) => {
+    const parts = text.trim().split(':');
+    if (!parts[0] || parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) return NaN;
+    return parts.reduce((total, p) => total * 60 + Number(p), 0);
+  };
+  const fmt = (t) => {
+    t = Math.floor(t * 10 + 1e-6) / 10;
+    const sec = (t % 60).toFixed(1).padStart(4, '0');
+    const min = Math.floor((t % 3600) / 60);
+    return t >= 3600 ? `${Math.floor(t / 3600)}:${String(min).padStart(2, '0')}:${sec}` : `${min}:${sec}`;
+  };
+  const setField = (id, time) => {
+    get(id).value = fmt(time);
+    summarize();
+  };
+
+  // Ispod polja: koliko traje scena, da li je dovoljno duga i da li je već iskorištena.
+  function summarize() {
+    const start = parseTime(get('cl-start').value);
+    const end = parseTime(get('cl-end').value);
+    const hookFrom = parseTime(get('cl-hook-start').value);
+    const hookTo = parseTime(get('cl-hook-end').value);
+    const out = get('cl-summary');
+    if (!(end > start)) {
+      out.textContent = '';
+      return;
+    }
+    const hook = hookTo > hookFrom ? hookTo - hookFrom : 0;
+    const notes = [`Scene ${(end - start).toFixed(1)} s${hook ? `, plus a ${hook.toFixed(1)} s hook` : ''}.`];
+    const tooShort = end - start + hook < minSeconds;
+    if (tooShort) notes.push(`This campaign asks for at least ${minSeconds} s.`);
+    const share = Math.max(0, ...used.map((u) => Math.max(0, Math.min(end, u.end) - Math.max(start, u.start)) / (end - start)));
+    if (share >= 0.5) notes.push(`${Math.round(share * 100)}% of this scene is already in another clip of this campaign.`);
+    out.textContent = notes.join(' ');
+    out.classList.toggle('error', tooShort);
+  }
+  for (const id of ['cl-start', 'cl-end', 'cl-hook-start', 'cl-hook-end']) get(id).addEventListener('input', summarize);
+  summarize();
+
+  // Red transkripta izabran klikom; iz njega se postavljaju početak, kraj ili hook.
+  let picked = null;
+  function pick(row) {
+    for (const r of document.querySelectorAll('#tr-lines li.is-active')) r.classList.remove('is-active');
+    picked = row;
+    row.classList.add('is-active');
+    get('tr-actions').hidden = false;
+    get('tr-picked').textContent = `${fmt(Number(row.dataset.s))} selected`;
+    video.currentTime = Number(row.dataset.s);
+    video.play().catch(() => {});
+  }
+
+  document.addEventListener('click', (e) => {
+    const row = e.target.closest('#tr-lines li');
+    if (row) return pick(row);
+    const button = e.target.closest('button');
+    if (!button) return;
+    if (button.dataset.clSet) setField(button.dataset.clSet, video.currentTime);
+    else if (button.hasAttribute('data-cl-hook')) {
+      setField('cl-hook-start', video.currentTime);
+      setField('cl-hook-end', video.currentTime + 2);
+    } else if (button.dataset.tr && picked) {
+      const from = Number(picked.dataset.s);
+      const to = Number(picked.dataset.e);
+      if (button.dataset.tr === 'start') setField('cl-start', from);
+      else if (button.dataset.tr === 'end') setField('cl-end', to);
+      else {
+        setField('cl-hook-start', from);
+        setField('cl-hook-end', Math.min(to, from + 2));
+      }
+    }
+  });
+
+  // Pretraga: ostaju samo redovi u kojima se traženi tekst izgovara.
+  document.addEventListener('input', (e) => {
+    if (e.target.id !== 'tr-search') return;
+    const query = e.target.value.trim().toLowerCase();
+    let shown = 0;
+    for (const row of document.querySelectorAll('#tr-lines li')) {
+      const match = !query || row.lastElementChild.textContent.toLowerCase().includes(query);
+      row.classList.toggle('is-hidden', !match);
+      if (match) shown++;
+    }
+    get('tr-count').textContent = query ? `${shown} ${shown === 1 ? 'line matches' : 'lines match'}` : '';
+  });
+
+  // Red koji se upravo čuje je označen dok video ide.
+  let rows = null; // lista se učita kad zatreba, i ponovo nakon što transkript stigne
+  document.addEventListener('live:refresh', () => (rows = null));
+  let playing = null;
+  video.addEventListener('timeupdate', () => {
+    rows ||= [...document.querySelectorAll('#tr-lines li')].map((el) => ({ el, s: Number(el.dataset.s), e: Number(el.dataset.e) }));
+    const t = video.currentTime;
+    const now = rows.find((r) => t >= r.s && t < r.e);
+    if (now === playing) return;
+    if (playing) playing.el.classList.remove('is-playing');
+    if (now) now.el.classList.add('is-playing');
+    playing = now;
+  });
+}
 
 // Pregled Shorta dok je miš iznad njega
 document.addEventListener(

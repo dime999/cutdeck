@@ -61,6 +61,7 @@ function start() {
   db.prepare("UPDATE recordings SET status='pending', progress=0 WHERE status='analyzing' OR (status='ready' AND waveform IS NULL)").run();
   db.prepare("UPDATE clips SET status='pending', progress=0 WHERE status='rendering'").run();
   db.prepare("UPDATE captions SET status='pending', progress=0 WHERE status='transcribing'").run();
+  db.prepare("UPDATE transcripts SET status='pending', progress=0 WHERE status='transcribing'").run();
   tick();
   db.prepare("UPDATE exports SET status='pending', progress=0 WHERE status='rendering'").run();
   tickExports();
@@ -77,12 +78,20 @@ function tick() {
   const captioned = pending("SELECT id FROM clips WHERE status='pending' AND subtitles IS NOT NULL ORDER BY id LIMIT 1");
   const cap = captioned ? null : pending("SELECT id FROM captions WHERE status='pending' ORDER BY id LIMIT 1");
   const clip = captioned || (cap ? null : pending("SELECT id FROM clips WHERE status='pending' ORDER BY id LIMIT 1"));
-  const rec = clip || cap ? null : pending("SELECT id FROM recordings WHERE status='pending' AND hidden=0 ORDER BY id LIMIT 1");
-  if (!clip && !cap && !rec) return;
+  const transcript = clip || cap ? null : pending("SELECT id FROM transcripts WHERE status='pending' ORDER BY id LIMIT 1");
+  const rec = clip || cap || transcript ? null : pending("SELECT id FROM recordings WHERE status='pending' AND hidden=0 ORDER BY id LIMIT 1");
+  if (!clip && !cap && !transcript && !rec) return;
   busy = true;
   const controller = new AbortController();
-  current = { kind: clip ? 'clip' : cap ? 'captions' : 'recording', id: (clip || cap || rec).id, controller };
-  (clip ? renderClip(clip.id, controller.signal) : cap ? transcribeClip(cap.id, controller.signal) : analyze(rec.id))
+  current = { kind: clip ? 'clip' : cap ? 'captions' : transcript ? 'transcript' : 'recording', id: (clip || cap || transcript || rec).id, controller };
+  const job = clip
+    ? renderClip(clip.id, controller.signal)
+    : cap
+      ? transcribeClip(cap.id, controller.signal)
+      : transcript
+        ? transcribeRecording(transcript.id, controller.signal)
+        : analyze(rec.id);
+  job
     .catch((e) => console.error('[studio] unexpected error', e))
     .finally(() => {
       busy = false;
@@ -133,19 +142,24 @@ async function analyze(id) {
 async function renderClip(id, signal) {
   const clip = db.prepare('SELECT * FROM clips WHERE id=?').get(id);
   const fail = (msg) => db.prepare("UPDATE clips SET status='failed', error=? WHERE id=?").run(msg, id);
-  // Short sa titlovima nastaje iz već izrezanog Shorta, a običan iz snimka.
-  const source = clip.subtitles
+  // Short sa naknadno upisanim titlovima nastaje iz već izrezanog Shorta; svi ostali iz snimka.
+  const fromShort = Boolean(clip.source_clip_id);
+  const source = fromShort
     ? db.prepare('SELECT path FROM clips WHERE id=?').get(clip.source_clip_id)
     : db.prepare('SELECT path FROM recordings WHERE id=?').get(clip.recording_id);
   if (!source || !fs.existsSync(source.path)) {
-    return fail(clip.subtitles ? 'The original Short no longer exists on disk.' : 'The recording no longer exists on disk.');
+    return fail(fromShort ? 'The original Short no longer exists on disk.' : 'The recording no longer exists on disk.');
   }
   db.prepare("UPDATE clips SET status='rendering', progress=0, error=NULL WHERE id=?").run(id);
   try {
     const length = clip.end_s - clip.start_s;
     const onProgress = progressSetter('clips', id);
-    if (clip.subtitles) await media.renderCaptioned({ input: source.path, output: clip.path, subtitles: clip.subtitles, duration: length }, onProgress, signal);
-    else {
+    if (clip.edl) {
+      // Klip iz kampanje: dijelovi izvora, vertikalni kadar i titlovi u jednom prolazu.
+      await media.renderEdl({ input: source.path, output: clip.path, edl: JSON.parse(clip.edl), layout: clip.layout, overlay: clip.subtitles }, onProgress, signal);
+    } else if (fromShort) {
+      await media.renderCaptioned({ input: source.path, output: clip.path, subtitles: clip.subtitles, duration: length }, onProgress, signal);
+    } else {
       const overlay = clip.label ? media.buildLabelAss(JSON.parse(clip.label), media.SHORT_SIZE) : null;
       await media.renderShort({ input: source.path, output: clip.path, start: clip.start_s, duration: length, layout: clip.layout, overlay }, onProgress, signal);
     }
@@ -405,6 +419,7 @@ function deleteClip(clip) {
   removeFile(clip.path);
   fs.rm(thumbPath('clip', clip.id), { force: true }, () => {});
   db.prepare("DELETE FROM kits WHERE user_id=? AND kind='clip' AND item_id=?").run(clip.user_id, clip.id);
+  db.prepare('DELETE FROM posts WHERE clip_id=?').run(clip.id);
   db.prepare('DELETE FROM clips WHERE id=?').run(clip.id);
 }
 
@@ -432,4 +447,47 @@ function cancelShorts(userId) {
   return unfinished.length;
 }
 
-module.exports = { MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };
+// ── Clipping: transkript cijelog snimka i klipovi kampanje ──
+/** Stavlja prepoznavanje govora cijelog snimka u red; postojeći transkript se zamjenjuje. */
+function requestTranscript(recordingId) {
+  db.prepare(
+    `INSERT INTO transcripts (recording_id, created_at) VALUES (?, ?)
+     ON CONFLICT(recording_id) DO UPDATE SET status='pending', progress=0, error=NULL, words='[]'`
+  ).run(recordingId, db.now());
+  tick();
+}
+
+async function transcribeRecording(id, signal) {
+  const row = db.prepare('SELECT * FROM transcripts WHERE id=?').get(id);
+  const rec = db.prepare('SELECT * FROM recordings WHERE id=?').get(row.recording_id);
+  const fail = (msg) => db.prepare("UPDATE transcripts SET status='failed', error=? WHERE id=?").run(msg, id);
+  if (!rec || !fs.existsSync(rec.path)) return fail('The recording no longer exists on disk.');
+  const problem = media.transcribeProblem();
+  if (problem) return fail(problem);
+  db.prepare("UPDATE transcripts SET status='transcribing', progress=0, error=NULL WHERE id=?").run(id);
+  try {
+    const words = await media.recognizeWords(rec.path, rec.duration, progressSetter('transcripts', id), signal);
+    // Kratka imena polja, jer sat govora ima oko deset hiljada riječi.
+    const compact = words.map((w) => ({ s: Math.round(w.start * 100) / 100, e: Math.round(w.end * 100) / 100, t: w.text }));
+    db.prepare("UPDATE transcripts SET status='ready', progress=100, words=? WHERE id=?").run(JSON.stringify(compact), id);
+    console.log(`[studio] ✔ transcript of "${rec.name}" (${compact.length} words)`);
+  } catch (err) {
+    console.warn(`[studio] ✘ transcript of "${rec.name}": ${err.message}`);
+    fail(err.message);
+  }
+}
+
+/** Klip kampanje: složen iz dijelova izvora (edl), sa titlovima koji se upisuju u istom prolazu. */
+function createCampaignClip(rec, { campaignId, title, start, end, layout, edl, length, subtitles }) {
+  const file = path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`);
+  const r = db
+    .prepare(
+      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, campaign_id, edl, length_s, subtitles, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, campaignId, JSON.stringify(edl), length, subtitles, db.now());
+  tick();
+  return Number(r.lastInsertRowid);
+}
+
+module.exports = { MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, requestTranscript, createCampaignClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };

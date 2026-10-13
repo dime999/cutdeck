@@ -149,6 +149,43 @@ CREATE TABLE IF NOT EXISTS kits (
   updated_at   TEXT NOT NULL,
   UNIQUE (user_id, kind, item_id)
 );
+
+-- Clipping: pravila jednog briefa i epizoda iz koje se reže
+CREATE TABLE IF NOT EXISTS campaigns (
+  id            INTEGER PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  recording_id  INTEGER REFERENCES recordings(id) ON DELETE SET NULL,
+  hashtags      TEXT NOT NULL DEFAULT '',
+  tag_youtube   TEXT NOT NULL DEFAULT '',
+  tag_tiktok    TEXT NOT NULL DEFAULT '',
+  tag_instagram TEXT NOT NULL DEFAULT '',
+  tag_x         TEXT NOT NULL DEFAULT '',
+  banned        TEXT NOT NULL DEFAULT '',
+  min_seconds   INTEGER NOT NULL DEFAULT 7,
+  created_at    TEXT NOT NULL
+);
+
+-- Transkript cijelog snimka: riječi sa vremenima
+CREATE TABLE IF NOT EXISTS transcripts (
+  id           INTEGER PRIMARY KEY,
+  recording_id INTEGER NOT NULL UNIQUE REFERENCES recordings(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | transcribing | ready | failed
+  progress     INTEGER NOT NULL DEFAULT 0,
+  error        TEXT,
+  words        TEXT NOT NULL DEFAULT '[]',      -- JSON: [{s, e, t}], vremena u sekundama
+  created_at   TEXT NOT NULL
+);
+
+-- Gdje je klip iz kampanje objavljen
+CREATE TABLE IF NOT EXISTS posts (
+  id        INTEGER PRIMARY KEY,
+  clip_id   INTEGER NOT NULL REFERENCES clips(id) ON DELETE CASCADE,
+  platform  TEXT NOT NULL,                      -- youtube | tiktok | instagram | x
+  url       TEXT NOT NULL DEFAULT '',
+  posted_at TEXT,
+  UNIQUE (clip_id, platform)
+);
 `);
 
 // Kolone dodane nakon što je tabela već mogla biti napravljena.
@@ -164,6 +201,11 @@ addColumn('clips', 'subtitles', 'TEXT');
 addColumn('clips', 'followup', 'TEXT');
 // Natpis koji se crta preko Shorta, npr. { text: 'PART 3', position: 'top' } (JSON).
 addColumn('clips', 'label', 'TEXT');
+// Klip iz kampanje: kojoj kampanji pripada, iz kojih dijelova izvora je složen (JSON), koliko traje i opis za objavu.
+addColumn('clips', 'campaign_id', 'INTEGER');
+addColumn('clips', 'edl', 'TEXT');
+addColumn('clips', 'length_s', 'REAL');
+addColumn('clips', 'caption', 'TEXT');
 
 db.now = () => new Date().toISOString();
 

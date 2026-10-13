@@ -215,7 +215,7 @@ route(
     const rec = userRecording(ctx);
     if (!rec) return html(ctx, views.errorPage(ctx, 404, 'This recording does not exist.'), 404);
     const moments = db.prepare('SELECT * FROM moments WHERE recording_id=? ORDER BY start_s').all(rec.id);
-    const clips = db.prepare('SELECT * FROM clips WHERE recording_id=? AND user_id=? ORDER BY id DESC').all(rec.id, ctx.user.id);
+    const clips = db.prepare('SELECT * FROM clips WHERE recording_id=? AND user_id=? AND campaign_id IS NULL ORDER BY id DESC').all(rec.id, ctx.user.id);
     rec.hasThumb = fs.existsSync(studio.thumbPath('rec', rec.id));
     const bumpers = db.prepare('SELECT id, name, duration FROM bumpers WHERE user_id=? ORDER BY name COLLATE NOCASE').all(ctx.user.id);
     html(
@@ -344,7 +344,7 @@ route(
   'GET',
   '/shorts',
   (ctx) => {
-    const clips = db.prepare('SELECT * FROM clips WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
+    const clips = db.prepare('SELECT * FROM clips WHERE user_id=? AND campaign_id IS NULL ORDER BY id DESC LIMIT 200').all(ctx.user.id);
     html(ctx, views.shortsPage(ctx, { clips: markPublished('clip', withThumbs(clips)), ffmpegOk: media.isAvailable() }));
   }
 );
@@ -425,9 +425,19 @@ route(
     const recs = recId
       ? db.prepare('SELECT id, status, progress FROM recordings WHERE id=? AND user_id=? AND hidden=0').all(recId, ctx.user.id)
       : db.prepare('SELECT id, status, progress FROM recordings WHERE user_id=? AND hidden=0').all(ctx.user.id);
+    // Lista klipova odgovara stranici koja pita: jedan snimak, jedna kampanja, sve (bočni meni) ili Shorts bez kampanja.
+    const campaignId = Number(ctx.query.get('campaign')) || null;
+    const pick = 'SELECT id, status, progress FROM clips WHERE user_id=?';
     const clips = recId
-      ? db.prepare('SELECT id, status, progress FROM clips WHERE user_id=? AND recording_id=?').all(ctx.user.id, recId)
-      : db.prepare('SELECT id, status, progress FROM clips WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
+      ? db.prepare(`${pick} AND recording_id=? AND campaign_id IS NULL`).all(ctx.user.id, recId)
+      : campaignId
+        ? db.prepare(`${pick} AND campaign_id=?`).all(ctx.user.id, campaignId)
+        : ctx.query.get('all')
+          ? db.prepare(pick).all(ctx.user.id)
+          : db.prepare(`${pick} AND campaign_id IS NULL ORDER BY id DESC LIMIT 200`).all(ctx.user.id);
+    const transcripts = db
+      .prepare('SELECT t.recording_id, t.status, t.progress FROM transcripts t JOIN recordings r ON r.id = t.recording_id WHERE r.user_id=?')
+      .all(ctx.user.id);
     const videos = db.prepare('SELECT id, status, progress FROM exports WHERE user_id=? ORDER BY id DESC LIMIT 200').all(ctx.user.id);
     const captions = db
       .prepare('SELECT c.clip_id, c.status, c.progress FROM captions c JOIN clips ON clips.id = c.clip_id WHERE clips.user_id=?')
@@ -438,6 +448,7 @@ route(
         ...clips.map((c) => ({ key: `clip:${c.id}`, status: c.status, progress: c.progress })),
         ...videos.map((v) => ({ key: `video:${v.id}`, status: v.status, progress: v.progress })),
         ...captions.map((c) => ({ key: `captions:${c.clip_id}`, status: c.status, progress: c.progress })),
+        ...transcripts.map((t) => ({ key: `transcript:${t.recording_id}`, status: t.status, progress: t.progress })),
       ],
     });
   }
@@ -926,6 +937,9 @@ route('POST', '/publish/:kind/:id', async (ctx) => {
   }
   redirect(ctx, `/publish/${item.kind}/${item.id}`);
 });
+
+// ── Sekcija Clipping (vlastiti fajlovi: clipping-routes.js, clipping-views.js, lib/clipping.js) ──
+require('./clipping-routes')({ route, html, redirect, flash, readForm, getSetting });
 
 // ── Javne stranice ────────────────────────────────────────
 route('GET', '/privacy', (ctx) => html(ctx, views.privacyPage(ctx)));

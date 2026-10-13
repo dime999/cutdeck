@@ -1,6 +1,6 @@
 # CutDeck: baza znanja
 
-Stanje na dan 13. 10. 2026, nakon commita `7a7728d`. Ovaj dokument opisuje šta je do sada napravljeno, kako radi i zašto je tako odlučeno. Uputstvo za korištenje je u [README.md](../README.md); ovdje je ono što treba znati da bi se projekat nastavio razvijati.
+Stanje na dan 13. 10. 2026, nakon commita `d32edf3` i dodavanja sekcije Clipping. Ovaj dokument opisuje šta je do sada napravljeno, kako radi i zašto je tako odlučeno. Uputstvo za korištenje je u [README.md](../README.md); ovdje je ono što treba znati da bi se projekat nastavio razvijati.
 
 ## 1. Šta je CutDeck
 
@@ -133,6 +133,20 @@ Bilo koji redoslijed snimaka, Shortsa i klipova, najviše 30 dijelova. Polje **F
 
 Za Short, video ili snimak: naslov (100), opis (5000), hashtagovi (500), tagovi (500), thumbnail za vodoravne videe, dugmad za kopiranje, skidanje videa, link na YouTube Studio i oznaka "objavljeno". **Save and reuse for new kits** pamti opis, hashtagove i tagove kao početni tekst novih paketa. Tekst piše korisnik; aplikacija ga ne smišlja.
 
+### 4.12 Clipping (kampanje)
+
+Odvojena sekcija za clipping kampanje, u kojima se po zadanim pravilima klipa tuđa epizoda. Ostatak aplikacije nije mijenjan: klipovi kampanje su u tabeli `clips` s popunjenim `campaign_id` i ne prikazuju se na stranici Shorts ni na stranici snimka.
+
+- **Kampanja** veže pravila za jednu epizodu (snimak): hashtagovi, tag po platformi (YouTube, TikTok, Instagram, X), zabranjene riječi i najkraća dužina klipa.
+- **Transkript epizode** nastaje jednom, istim prepoznavanjem govora kao titlovi, i čuva se po riječima. Na stranici kampanje se pretražuje; klik na red premota player, a red se može postaviti kao početak, kraj ili hook.
+- **Hook** je dio od 0,5 do 5 s koji se pušta prije scene.
+- **Izbacivanje pauza** iz scene uklanja tišine između riječi duže od 0,6 s, uz 0,15 s zraka oko govora.
+- **Titlovi** se ne prepoznaju ponovo: riječi transkripta se preslikaju na vrijeme gotovog klipa i upišu u sliku u istom prolazu.
+- **Provjera pravila** na stranici klipa: dužina, titlovi, zabranjene riječi (naslov, opis, titlovi), napisan opis.
+- **Tekst za objavu** po platformi: opis + tag te platforme + hashtagovi kampanje. Za svaku platformu se bilježi da li je objavljeno i link.
+- **Upozorenje na ponavljanje** kad se nova scena barem 50% poklapa s postojećim klipom kampanje; redovi transkripta koji su već iskorišteni su označeni.
+- **Varijacija**: link koji otvara formu s početkom i krajem postojećeg klipa.
+
 ## 5. Arhitektura
 
 - **Node.js 22.13 ili noviji**, bez ijednog npm paketa. Baza je ugrađeni `node:sqlite`.
@@ -146,6 +160,8 @@ Za Short, video ili snimak: naslov (100), opis (5000), hashtagovi (500), tagovi 
 | `src/views.js` | HTML stranice; sve korisničke vrijednosti prolaze kroz `h()` |
 | `src/lib/media.js` | Sve što poziva ffmpeg: analiza zvuka, prijedlozi, rezanje, spajanje, titlovi, sličice |
 | `src/lib/studio.js` | Redovi poslova, skeniranje foldera, lanac, dijeljenje, prekid |
+| `src/clipping-routes.js`, `src/clipping-views.js` | Rute i stranice sekcije Clipping; `server.js` ih samo priključuje |
+| `src/lib/clipping.js` | Čista logika kampanja: lista dijelova (EDL), pauze, preslikavanje riječi, provjera pravila, tekst za objavu |
 | `src/lib/db.js` | Šema baze i dodavanje novih kolona postojećim bazama |
 | `src/lib/config.js` | Čitanje `.env`, putanje, pronalazak ffmpeg-a |
 | `public/app.js` | Vremenska traka, editori, kopiranje, potvrde, osvježavanje stanja |
@@ -183,12 +199,16 @@ Sve je u folderu `data/`, koji nije u gitu.
 | `bumpers` | Intro i outro klipovi | `duration`, `has_audio` |
 | `exports` | Gotovi videi | `parts` (JSON: redoslijed dijelova, `main` označava dio koji daje veličinu), `status` |
 | `kits` | Paketi za objavu | `kind` (clip, video, recording), `item_id`, `published_at` |
+| `campaigns` | Clipping kampanje | `recording_id`, `hashtags`, `tag_youtube`…`tag_x`, `banned`, `min_seconds` |
+| `transcripts` | Transkript cijelog snimka | `recording_id`, `status`, `words` (JSON: `{s, e, t}` po riječi) |
+| `posts` | Objave klipa po platformi | `clip_id`, `platform`, `url`, `posted_at` |
 | `settings` | Podešavanja | `caption_style`, `kit_defaults` |
 
 Napomene:
 
 - U kodu se gotov video zove *export* (tabela `exports`), jer je ime `videos` zauzeto u bazama nastalim u vrijeme MultiPosta. Takve baze mogu imati i neiskorištene tabele `accounts`, `uploads`, `videos`, `jobs` te folder `data/uploads`.
 - Nove kolone se postojećim bazama dodaju funkcijom `addColumn` u `db.js`. `CREATE TABLE IF NOT EXISTS` ne mijenja postojeću tabelu, pa svaka nova kolona mora ići i tim putem.
+- Klip kampanje je red u `clips` s kolonama `campaign_id`, `edl` (JSON lista dijelova izvora, hook ima `hook: true`), `length_s` (stvarna dužina nakon rezova) i `caption` (opis za objavu). `start_s` i `end_s` su i dalje granice scene u epizodi.
 - Brisanje Shorta briše i njegove titlove (strani ključ) i njegov paket za objavu (ručno, u `deleteClip`).
 
 ## 7. Redovi poslova i lanac
@@ -202,8 +222,9 @@ Redoslijed u glavnoj traci:
 
 1. Short s titlovima koji čeka upisivanje u sliku
 2. Prepoznavanje govora koje čeka
-3. Običan Short koji čeka rezanje
-4. Analiza novog snimka
+3. Običan Short koji čeka rezanje (i klip kampanje)
+4. Transkript epizode koji čeka
+5. Analiza novog snimka
 
 Zbog ovog redoslijeda se svaki dio završi do kraja prije nego krene sljedeći. Ranije je red bio "prvo svi Shorts, pa titlovi", pa su pri dijeljenju snimka titlovi stizali tek nakon zadnjeg dijela.
 
@@ -249,6 +270,10 @@ Zbog ovog redoslijeda se svaki dio završi do kraja prije nego krene sljedeći. 
 - Titlovi se upisuju u sliku kao ASS fajl. Isticanje je izvedeno s po jednim događajem za svaku riječ, u kojem je ta riječ u drugoj boji.
 - Pomoćni model za prepoznavanje glasa (VAD) je isproban i odbačen: usporio je obradu oko 9 puta, a nije popravio vremena.
 
+### 8.4a Klip iz više dijelova (`renderEdl`)
+
+Klip kampanje nastaje u jednom ffmpeg prolazu: svaki dio liste se iz istog ulaza izdvaja filterima `trim` i `atrim`, dijelovi se spajaju filterom `concat`, pa na spojenu sliku idu raspored 9:16 i titlovi. Vremena titlova se računaju unaprijed (`mapWords`): riječ pripada dijelu u kojem joj je sredina. Forma u `app.js` ispod polja pokazuje dužinu scene i hooka prije izbacivanja pauza; stvarnu dužinu računa server.
+
 ### 8.4 Putanje u ffmpeg filterima
 
 Putanja kao vrijednost opcije filtera mora imati kose crte naprijed, označenu dvotačku i navodnike (`'C\:/…'`). To radi `filterPath` u `media.js`. Putanja s apostrofom nije podržana.
@@ -285,8 +310,12 @@ Nakon premotavanja preglednik javi `seeked` prije nego što je kadar dostupan za
 | `GET`, `POST /videos/merge` | Spajanje više videa |
 | `POST /videos/:id/cancel`, `POST /videos/:id/delete` | Prekid i brisanje videa |
 | `GET`, `POST /publish/:kind/:id` | Paket za objavu |
+| `GET`, `POST /clipping` | Lista kampanja, nova kampanja |
+| `GET`, `POST /clipping/:id`, `POST /clipping/:id/delete` | Stranica kampanje, izmjena pravila, brisanje |
+| `POST /clipping/:id/transcribe`, `POST /clipping/:id/clips` | Transkript epizode, novi klip |
+| `GET`, `POST /clipping/clips/:id`, `POST /clipping/clips/:id/delete` | Provjera pravila, tekst i evidencija objava; brisanje klipa |
 | `GET …/file`, `GET …/thumb` | Video i slike, uz podršku za Range |
-| `GET /api/studio/status` | Stanje poslova za osvježavanje stranica |
+| `GET /api/studio/status` | Stanje poslova za osvježavanje stranica (`?campaign=N` za klipove kampanje, `?all=1` za bočni meni) |
 | `GET /privacy`, `GET /terms`, `GET /healthz` | Tekstualne stranice i provjera rada |
 
 ## 10. Izgled
@@ -297,7 +326,7 @@ Uzor su alati za video (DaVinci Resolve, CapCut, Frame.io). Ideja je radni sto z
 - **Jantarna** (`--amber`) znači zvuk i glavnu akciju: stubići glasnoće, prijedlozi, glavno dugme.
 - **Plava** (`--sky`) znači korisnikov izbor: označeni dio trake, izabrana opcija, fokus.
 - **Pismo:** Bahnschrift za naslove, dugmad i vremena; Segoe UI za tekst. Oba dolaze s Windowsom, pa nema vanjskih fontova.
-- **Raspored:** bočni meni s grupama Library, Create, Assets; na uskom ekranu se sklapa u traku na vrhu.
+- **Raspored:** bočni meni s grupama Library, Create, Assets, Clipping; na uskom ekranu se sklapa u traku na vrhu.
 - Samo tamna tema.
 - Potvrda prije brisanja je prozor u stilu aplikacije (`<dialog>`). Tekst dolazi iz atributa `data-confirm`: dio do prvog upitnika je naslov, ostatak objašnjenje.
 
@@ -347,6 +376,8 @@ Probni materijal je bio generisan: ffmpeg testna slika i sintetički Windows gla
 
 ## 14. Poznata ograničenja i neprovjereno
 
+- **Clipping je isproban samo na sintetičkom govoru od 90 sekundi.** Transkript cijele epizode od sat vremena nije mjeren (vrijeme, memorija), a izbacivanje pauza zavisi od tačnosti vremena riječi.
+- **Clipping ne provjerava** da li je snimak iz prave epizode, da li je klip prijavljen i u drugu kampanju, niti publiku naloga. Zabranjene riječi se traže samo u tekstu, ne u slici.
 - **Pravi PS5 snimak nikad nije isproban.** Posebno HDR: boje u Shortu ili videu mogu ispasti isprane, jer konverzija HDR-a nije ugrađena.
 - **Tačnost titlova** je mjerena samo na sintetičkom glasu. S pravim glasom i glasnom igrom ispod njega može biti lošija.
 - **Prvi titl** se ponekad pojavi prije nego što govor počne.
@@ -368,7 +399,7 @@ Ideje o kojima se razgovaralo, a nisu urađene:
 - prijedlozi trenutaka i pretraga snimka po izgovorenom tekstu;
 - podijeljen ekran za Shorts (igra gore, kamera dole) i ručno biranje dijela kadra;
 - ujednačavanje glasnoće na nivo koji YouTube preporučuje;
-- kalendar objava i evidencija iskorištenih dijelova snimka;
+- kalendar objava;
 - pretvaranje HDR snimaka;
 - automatski testovi u repou;
 - automatska objava na YouTube, što traži Googleov audit i povratak prijave.
