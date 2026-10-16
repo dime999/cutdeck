@@ -7,6 +7,7 @@ const cfg = require('./config');
 const db = require('./db');
 const media = require('./media');
 const effects = require('./effects');
+const longvideo = require('./longvideo');
 
 const VIDEO_EXT = /\.(mp4|mov|m4v|mkv|webm|avi|mts|ts)$/i;
 const MIN_CLIP = 3;
@@ -63,6 +64,8 @@ function start() {
   db.prepare("UPDATE clips SET status='pending', progress=0 WHERE status='rendering'").run();
   db.prepare("UPDATE captions SET status='pending', progress=0 WHERE status='transcribing'").run();
   db.prepare("UPDATE transcripts SET status='pending', progress=0 WHERE status='transcribing'").run();
+  db.prepare("UPDATE activity SET status='pending', progress=0 WHERE status='scanning'").run();
+  db.prepare("UPDATE scenes SET status='pending', progress=0 WHERE status='scanning'").run();
   tick();
   db.prepare("UPDATE exports SET status='pending', progress=0 WHERE status='rendering'").run();
   tickExports();
@@ -81,17 +84,23 @@ function tick() {
   const clip = captioned || (cap ? null : pending("SELECT id FROM clips WHERE status='pending' ORDER BY id LIMIT 1"));
   const transcript = clip || cap ? null : pending("SELECT id FROM transcripts WHERE status='pending' ORDER BY id LIMIT 1");
   const rec = clip || cap || transcript ? null : pending("SELECT id FROM recordings WHERE status='pending' AND hidden=0 ORDER BY id LIMIT 1");
-  if (!clip && !cap && !transcript && !rec) return;
+  const scan = clip || cap || transcript || rec ? null : pending("SELECT id FROM activity WHERE status='pending' ORDER BY id LIMIT 1");
+  const cuts = clip || cap || transcript || rec || scan ? null : pending("SELECT id FROM scenes WHERE status='pending' ORDER BY id LIMIT 1");
+  if (!clip && !cap && !transcript && !rec && !scan && !cuts) return;
   busy = true;
   const controller = new AbortController();
-  current = { kind: clip ? 'clip' : cap ? 'captions' : transcript ? 'transcript' : 'recording', id: (clip || cap || transcript || rec).id, controller };
+  current = { kind: clip ? 'clip' : cap ? 'captions' : transcript ? 'transcript' : rec ? 'recording' : scan ? 'activity' : 'scenes', id: (clip || cap || transcript || rec || scan || cuts).id, controller };
   const job = clip
     ? renderClip(clip.id, controller.signal)
     : cap
       ? transcribeClip(cap.id, controller.signal)
       : transcript
         ? transcribeRecording(transcript.id, controller.signal)
-        : analyze(rec.id);
+        : rec
+          ? analyze(rec.id)
+          : scan
+            ? scanActivity(scan.id, controller.signal)
+            : scanScenes(cuts.id, controller.signal);
   job
     .catch((e) => console.error('[studio] unexpected error', e))
     .finally(() => {
@@ -283,8 +292,148 @@ function cancelExport(id) {
   return true;
 }
 
+// ── Auto edit dugog videa ─────────────────────────────────
+/** Stavlja analizu pokreta snimka u red (ili ponovo, uz `again`). */
+function requestActivity(recordingId, again = false) {
+  db.prepare(
+    `INSERT INTO activity (recording_id, created_at) VALUES (?, ?)
+     ON CONFLICT(recording_id) DO ${again ? "UPDATE SET status='pending', progress=0, error=NULL" : 'NOTHING'}`
+  ).run(recordingId, db.now());
+  tick();
+}
+
+async function scanActivity(id, signal) {
+  const row = db.prepare('SELECT * FROM activity WHERE id=?').get(id);
+  const rec = db.prepare('SELECT * FROM recordings WHERE id=?').get(row.recording_id);
+  const fail = (msg) => db.prepare("UPDATE activity SET status='failed', error=? WHERE id=?").run(msg, id);
+  if (!rec || !fs.existsSync(rec.path)) return fail('The recording no longer exists on disk.');
+  db.prepare("UPDATE activity SET status='scanning', progress=0, error=NULL WHERE id=?").run(id);
+  try {
+    await recordingLevels(rec); // glasnoća po sekundi treba planu; snimci analizirani ranije je dobiju sada
+    const { motion, black } = await longvideo.activityScan(rec.path, rec.duration, progressSetter('activity', id), signal);
+    db.prepare("UPDATE activity SET status='ready', progress=100, motion=?, black=? WHERE id=?").run(JSON.stringify(motion), JSON.stringify(black), id);
+    console.log(`[studio] ✔ activity of "${rec.name}"`);
+  } catch (err) {
+    if (signal.aborted) return;
+    console.warn(`[studio] ✘ activity of "${rec.name}": ${err.message}`);
+    fail(err.message);
+  }
+}
+
+/** Stavlja traženje rezova (scena) snimka u red (ili ponovo, uz `again`). */
+function requestScenes(recordingId, again = false) {
+  db.prepare(
+    `INSERT INTO scenes (recording_id, created_at) VALUES (?, ?)
+     ON CONFLICT(recording_id) DO ${again ? "UPDATE SET status='pending', progress=0, error=NULL" : 'NOTHING'}`
+  ).run(recordingId, db.now());
+  tick();
+}
+
+async function scanScenes(id, signal) {
+  const row = db.prepare('SELECT * FROM scenes WHERE id=?').get(id);
+  const rec = db.prepare('SELECT * FROM recordings WHERE id=?').get(row.recording_id);
+  const fail = (msg) => db.prepare("UPDATE scenes SET status='failed', error=? WHERE id=?").run(msg, id);
+  if (!rec || !fs.existsSync(rec.path)) return fail('The recording no longer exists on disk.');
+  db.prepare("UPDATE scenes SET status='scanning', progress=0, error=NULL WHERE id=?").run(id);
+  try {
+    const { cuts, black } = await longvideo.sceneScan(rec.path, rec.duration, progressSetter('scenes', id), signal);
+    db.prepare("UPDATE scenes SET status='ready', progress=100, cuts=?, black=? WHERE id=?").run(JSON.stringify(cuts), JSON.stringify(black), id);
+    console.log(`[studio] ✔ scenes of "${rec.name}" (${cuts.length} cuts)`);
+  } catch (err) {
+    if (signal.aborted) return;
+    console.warn(`[studio] ✘ scenes of "${rec.name}": ${err.message}`);
+    fail(err.message);
+  }
+}
+
+/** Novi dugi video iz plana Auto edita; ide u traku za videe. Paket za objavu se odmah popuni. */
+function createAutoEdit(rec, { title, plan, names, description, intro, outro, logo, quality }) {
+  const file = path.join(cfg.videosDir, `${crypto.randomBytes(16).toString('hex')}.mp4`);
+  const parts = [
+    ...(intro ? [{ kind: 'bumper', id: intro.id, name: intro.name }] : []),
+    { kind: 'recording', id: rec.id, name: rec.name, main: true },
+    ...(outro ? [{ kind: 'bumper', id: outro.id, name: outro.name }] : []),
+  ];
+  const stored = { recording_id: rec.id, segments: plan.segments, hook: plan.hook, chapters: plan.chapters, names, intro: intro && intro.id, outro: outro && outro.id, logo, quality };
+  const r = db
+    .prepare('INSERT INTO exports (user_id, title, parts, path, plan, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(rec.user_id, title, JSON.stringify(parts), file, JSON.stringify(stored), db.now());
+  const id = Number(r.lastInsertRowid);
+  db.prepare(
+    `INSERT INTO kits (user_id, kind, item_id, title, description, hashtags, tags, updated_at) VALUES (?, 'video', ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(user_id, kind, item_id) DO UPDATE SET title=excluded.title, description=excluded.description`
+  ).run(rec.user_id, id, title, description, '#NoCommentary #Gameplay', 'no commentary, gameplay, walkthrough', db.now());
+  tickExports();
+  return id;
+}
+
+/**
+ * Pravi dugi video iz plana: svaki dio (intro, najava, dijelovi snimka, outro) se kodira u isti
+ * format u privremeni folder, pa se spoje bez ponovnog kodiranja slike, uz ujednačenu glasnoću.
+ */
+async function renderAutoEdit(exp, signal) {
+  const plan = JSON.parse(exp.plan);
+  const rec = db.prepare('SELECT * FROM recordings WHERE id=?').get(plan.recording_id);
+  if (!rec || !fs.existsSync(rec.path)) throw new Error('The recording no longer exists on disk.');
+  const info = await media.probe(rec.path);
+  const hdr = await longvideo.isHdr(rec.path).catch(() => false);
+  const even = (n) => Math.max(2, Math.round(n / 2) * 2);
+  const height = plan.quality === 'source' ? even(Math.min(info.height, 2160)) : even(Math.min(info.height, 1080));
+  const width = even((info.width * height) / info.height);
+  const [num, den] = String(info.fps).split('/').map(Number);
+  const fps = num / (den || 1) > 60 ? '60/1' : info.fps;
+  const logo = plan.logo && plan.logo.file && fs.existsSync(plan.logo.file) ? plan.logo : null;
+  const bumper = (bid) => (bid ? db.prepare('SELECT * FROM bumpers WHERE id=?').get(bid) : null);
+
+  // Redoslijed dijelova gotovog videa.
+  const jobs = [];
+  for (const b of [bumper(plan.intro)].filter((x) => x && fs.existsSync(x.path))) jobs.push({ input: b.path, duration: b.duration, hasAudio: Boolean(b.has_audio), hdr: false, logo: null });
+  if (plan.hook) jobs.push({ input: rec.path, start: plan.hook.start, duration: plan.hook.end - plan.hook.start, fadeIn: 0.25, fadeOut: 0.35, hdr, hasAudio: info.hasAudio, logo });
+  plan.segments.forEach((s, i) =>
+    jobs.push({ input: rec.path, start: s.start, duration: s.end - s.start, fadeIn: i === 0 && plan.hook ? 0.35 : 0, fadeOut: 0, hdr, hasAudio: info.hasAudio, logo })
+  );
+  for (const b of [bumper(plan.outro)].filter((x) => x && fs.existsSync(x.path))) jobs.push({ input: b.path, duration: b.duration, hasAudio: Boolean(b.has_audio), hdr: false, logo: null });
+
+  const work = path.join(cfg.tmpDir, `autoedit-${exp.id}-${crypto.randomBytes(4).toString('hex')}`);
+  fs.mkdirSync(work, { recursive: true });
+  const total = jobs.reduce((sum, j) => sum + j.duration, 0);
+  const setProgress = progressSetter('exports', exp.id);
+  try {
+    let done = 0;
+    const outputs = [];
+    for (const [i, job] of jobs.entries()) {
+      const output = path.join(work, `part-${String(i).padStart(4, '0')}.mp4`);
+      await longvideo.renderSegment({ ...job, output, width, height, fps }, (f) => setProgress(((done + f * job.duration) / total) * 0.95), signal);
+      outputs.push(output);
+      done += job.duration;
+    }
+    const listFile = path.join(work, 'list.txt');
+    fs.writeFileSync(listFile, longvideo.concatList(outputs));
+    await longvideo.joinSegments({ listFile, output: exp.path, duration: total }, (f) => setProgress(0.95 + f * 0.05), signal);
+  } finally {
+    fs.rm(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }, () => {});
+  }
+}
+
 async function renderExport(id, signal) {
   const exp = db.prepare('SELECT * FROM exports WHERE id=?').get(id);
+  if (exp.plan) {
+    db.prepare("UPDATE exports SET status='rendering', progress=0, error=NULL WHERE id=?").run(id);
+    try {
+      await renderAutoEdit(exp, signal);
+      const out = await media.probe(exp.path);
+      const plan = JSON.parse(exp.plan);
+      await media.thumbnail(exp.path, thumbPath('video', id), plan.hook ? 3 : Math.min(30, out.duration / 3), 480).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
+      db.prepare("UPDATE exports SET status='ready', progress=100, size=?, duration=?, width=?, height=? WHERE id=?").run(fs.statSync(exp.path).size, out.duration, out.width, out.height, id);
+      console.log(`[studio] ✔ auto edit "${exp.title}"`);
+    } catch (err) {
+      const message = signal.aborted ? 'Cancelled.' : err.message;
+      console.warn(`[studio] ✘ auto edit "${exp.title}": ${message}`);
+      fs.rm(exp.path, { force: true }, () => {});
+      db.prepare("UPDATE exports SET status='failed', error=? WHERE id=?").run(message, id);
+    }
+    return;
+  }
   db.prepare("UPDATE exports SET status='rendering', progress=0, error=NULL WHERE id=?").run(id);
   try {
     const parts = [];
@@ -572,4 +721,4 @@ async function recordingLevels(rec) {
   }
 }
 
-module.exports = { addMeme, deleteMeme, createMemeClip, rerenderCampaignClip, recordingLevels, MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, requestTranscript, createCampaignClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };
+module.exports = { requestScenes, requestActivity, createAutoEdit, addMeme, deleteMeme, createMemeClip, rerenderCampaignClip, recordingLevels, MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, requestTranscript, createCampaignClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };

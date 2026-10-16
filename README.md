@@ -56,6 +56,29 @@ Kako je sve napravljeno i zašto, stoji u [bazi znanja](docs/KNOWLEDGE_BASE.md).
 
 Prijedlozi se zasnivaju samo na glasnoći zvuka, pa ih uvijek pregledaj prije rezanja. Uklanjanje snimka sa liste ne briše fajl sa diska.
 
+## Auto edit dugog videa (bez komentara)
+
+Od sirovog snimka igranja pravi dugi video spreman za YouTube.
+
+1. Otvori snimak i klikni **Auto edit long video**. Aplikacija prvo pregleda snimak (pokret slike, crna slika, glasnoća); sat snimka traje nekoliko minuta.
+2. Dobiješ plan: traka snimka pokazuje šta ostaje (zeleno), šta se izbacuje (učitavanja, meniji, pauze, dug hod bez akcije) i odakle je najava. Izaberi dužinu (sve akcije ili oko 45/30/20/12 minuta) i koliko jako se reže, pa **Update the plan**.
+3. Poglavlja nastaju na mjestima izbačenih učitavanja; preimenuj ih po misijama. Ispod su prijedlozi za thumbnail: klik otvara editor thumbnaila na tom kadru.
+4. Upiši naslov, po želji logo, intro i outro, izaberi kvalitet (1080p ili kao snimak, do 4K) i klikni **Create the video**.
+
+Video počinje najavom od 12 sekundi (najjači trenutak), pa ide od početka. Glasnoća se ujednačava na −14 LUFS, HDR snimci (PS5) se pretvaraju da boje ne budu isprane, a snimak se nikad ne povećava iznad svoje rezolucije. Gotov video je pod **Videos**, a njegov paket za objavu je već popunjen naslovom i opisom s poglavljima. Plan gleda samo pokret i zvuk igre: ne zna razliku između cutscene koju želiš i praznog hoda, pa plan pogledaj prije pravljenja.
+
+## Shortsi iz kompilacije (po scenama)
+
+Za duži video koji je kompilacija klipova: svaki klip postaje svoj Short, tačno svoje dužine.
+
+1. Otvori snimak i klikni **Shorts from scenes**. Aplikacija pregleda svaku sličicu i nađe rezove između klipova (deset minuta videa traje oko minut).
+2. Dobiješ listu scena sa sličicom, vremenom i dužinom. Klik na sličicu pusti tu scenu.
+3. **Cuts** određuje koliko jak rez se računa kao novi klip. Short nikad nije kraći od 15 s: kraća scena se spaja sa kraćom susjednom (i kad tu susjednu odznačiš); **Shortest Short** može podići granicu na 20 ili 30 s. Crni prelazi između klipova se sami izbace.
+4. Ako je jedan klip ipak razbijen na dva, označi **Join with the next**; scene koje ne želiš odznači.
+5. Ispod playera biraš šta svaki Short odmah dobija: titlove iz glasa i tvoj logo (oba su unaprijed uključena, a izbor se pamti), raspored i naslov (Shortsi dobiju #1, #2…). Klikni **Create … Shorts**; ništa ne moraš dodavati naknadno.
+
+Scena duža od 3 minute se dijeli na jednake dijelove, jer Short ne može biti duži. Gotovi Shortsi su pod **Shorts**, gdje im možeš dodati memove.
+
 ## Cijeli snimak u Shorts odjednom
 
 1. Otvori snimak i klikni **Split into Shorts**.

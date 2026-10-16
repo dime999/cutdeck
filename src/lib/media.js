@@ -667,6 +667,7 @@ async function renderCaptioned({ input, output, subtitles, duration }, onProgres
 }
 
 module.exports = {
+  run,
   LAYOUTS,
   SHORT_SIZE,
   CAPTION_FONTS,

@@ -862,6 +862,49 @@ if (memeForm) {
   });
 }
 
+// ── Shorts from scenes: pusti scenu, broj označenih ───────
+const sceneForm = document.getElementById('scene-form');
+if (sceneForm) {
+  const video = document.getElementById('scene-player');
+  const button = document.getElementById('scene-submit');
+  const canCreate = !button.disabled;
+  const count = () => {
+    const boxes = [...sceneForm.querySelectorAll('input[name="scene"]')];
+    for (const box of boxes) box.closest('.sc-row').classList.toggle('is-off', !box.checked);
+    const n = boxes.filter((b) => b.checked).length;
+    document.getElementById('scene-all').checked = n === boxes.length;
+    button.querySelector('span').textContent = n ? `Create ${n} ${n === 1 ? 'Short' : 'Shorts'}` : 'Select at least one scene';
+    button.disabled = !canCreate || !n;
+  };
+  sceneForm.addEventListener('change', (e) => {
+    if (e.target.id === 'scene-all') for (const b of sceneForm.querySelectorAll('input[name="scene"]')) b.checked = e.target.checked;
+    count();
+  });
+  count();
+  let stopAt = null;
+  let row = null;
+  const done = () => {
+    if (row) row.classList.remove('is-playing');
+    stopAt = row = null;
+  };
+  sceneForm.addEventListener('click', (e) => {
+    const play = e.target.closest('[data-scene-play]');
+    if (!play) return;
+    done();
+    row = play.closest('.sc-row');
+    row.classList.add('is-playing');
+    stopAt = Number(play.dataset.sceneEnd);
+    video.currentTime = Number(play.dataset.scenePlay);
+    video.play().catch(() => {});
+  });
+  video.addEventListener('timeupdate', () => {
+    if (stopAt !== null && video.currentTime >= stopAt) {
+      video.pause();
+      done();
+    }
+  });
+}
+
 // ── Spajanje više videa ───────────────────────────────────
 const mergeForm = document.getElementById('merge-form');
 if (mergeForm) {

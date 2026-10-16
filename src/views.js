@@ -95,10 +95,13 @@ ${body}
 </html>`;
 }
 
-/** Kvačica „Add my logo“; bez postavljenog loga je isključena i vodi na stranicu Logo. */
-function watermarkCheck(ctx, checked = false) {
+/**
+ * Kvačica „Add my logo“; bez postavljenog loga umjesto nje stoji link na stranicu Logo.
+ * `checked` je početno stanje; uz `remember` preglednik pamti zadnji izbor (osim kod izmjene klipa, gdje važi stanje klipa).
+ */
+function watermarkCheck(ctx, checked = false, remember = 'watermark') {
   if (!ctx.logo) return `<p class="muted small wm-off">${icon('logo')}No logo yet. <a href="/logo">Add your logo</a> to put it on your Shorts.</p>`;
-  return `<label class="check"><input type="checkbox" name="watermark" value="1"${checked ? ' checked' : ' data-remember="watermark"'}> Add my logo <span class="muted">(${h(ctx.logo.position.replace('-', ' '))})</span></label>`;
+  return `<label class="check"><input type="checkbox" name="watermark" value="1"${checked ? ' checked' : ''}${remember ? ` data-remember="${remember}"` : ''}> Add my logo <span class="muted">(${h(ctx.logo.position.replace('-', ' '))})</span></label>`;
 }
 
 function fmtSize(bytes) {
@@ -350,7 +353,9 @@ ${
   <div class="head-actions">
     ${
       rec.status === 'ready'
-        ? `<a class="button primary" href="/recordings/${rec.id}/split">${icon('split')}Split into Shorts</a>
+        ? `<a class="button primary" href="/recordings/${rec.id}/autoedit">${icon('videos')}Auto edit long video</a>
+    <a class="button" href="/recordings/${rec.id}/scenes">${icon('shorts')}Shorts from scenes</a>
+    <a class="button" href="/recordings/${rec.id}/split">${icon('split')}Split into Shorts</a>
     <a class="button" href="/recordings/${rec.id}/thumbnail" id="thumb-link">${icon('thumbnails')}Create thumbnail</a>
     ${menu(
       'More actions for this recording',

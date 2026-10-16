@@ -181,6 +181,30 @@ CREATE TABLE IF NOT EXISTS campaigns (
 );
 
 -- Transkript cijelog snimka: riječi sa vremenima
+-- Pokret i crna slika po sekundi snimka, za Auto edit dugog videa
+CREATE TABLE IF NOT EXISTS activity (
+  id           INTEGER PRIMARY KEY,
+  recording_id INTEGER NOT NULL UNIQUE REFERENCES recordings(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | scanning | ready | failed
+  progress     INTEGER NOT NULL DEFAULT 0,
+  error        TEXT,
+  motion       TEXT NOT NULL DEFAULT '[]',      -- JSON: promjena slike 0–255 po sekundi
+  black        TEXT NOT NULL DEFAULT '[]',      -- JSON: true za sekunde sa crnom slikom
+  created_at   TEXT NOT NULL
+);
+
+-- Rezovi u snimku (kompilaciji), za Shortse po scenama
+CREATE TABLE IF NOT EXISTS scenes (
+  id           INTEGER PRIMARY KEY,
+  recording_id INTEGER NOT NULL UNIQUE REFERENCES recordings(id) ON DELETE CASCADE,
+  status       TEXT NOT NULL DEFAULT 'pending', -- pending | scanning | ready | failed
+  progress     INTEGER NOT NULL DEFAULT 0,
+  error        TEXT,
+  cuts         TEXT NOT NULL DEFAULT '[]',      -- JSON: [{ t, score }] svaki rez sa jačinom promjene slike 0–1
+  black        TEXT NOT NULL DEFAULT '[]',      -- JSON: true za sekunde sa crnom slikom
+  created_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS transcripts (
   id           INTEGER PRIMARY KEY,
   recording_id INTEGER NOT NULL UNIQUE REFERENCES recordings(id) ON DELETE CASCADE,
@@ -228,6 +252,8 @@ addColumn('clips', 'watermark', 'TEXT');
 addColumn('clips', 'memes', 'TEXT');
 // Efekat na videu koji prati mem (npr. zum uz Vine boom); memovi dodani prije ovoga ga dobiju po imenu.
 addColumn('memes', 'effect', 'TEXT');
+// Video iz Auto edita: plan (JSON: dijelovi snimka, najava, logo, intro, outro, kvalitet) umjesto liste dijelova.
+addColumn('exports', 'plan', 'TEXT');
 {
   const { guessEffect } = require('./effects');
   const setEffect = db.prepare('UPDATE memes SET effect=? WHERE id=?');

@@ -152,6 +152,18 @@ Biblioteka memova (tabela `memes`, fajlovi u `data/memes/`, do 20 s i 100 MB, i 
 - **Pregled u pregledniku** pokazuje mem preko playera istom animacijom (CSS), u istom položaju i veličini, a efekat kao CSS na playeru (`data-fx` na `#meme-stage`).
 - Obrisan mem se pri pravljenju preskače; ako ne ostane nijedan, Short ne uspije uz jasnu poruku.
 
+### 4.11c Auto edit dugog videa (bez komentara)
+
+Stranica `/recordings/:id/autoedit`. Tri dijela:
+
+- **Analiza** (`activity`, posao u glavnoj traci, `longvideo.activityScan`): ffmpeg čita samo ključne sličice (`-skip_frame nokey`, `fps=1`, 64×36 sivo) i računa promjenu slike prema prethodnoj sekundi i crnu sliku (prosjek < 16). Ako ima premalo novih sličica (ključna rjeđe od ~2 s), čita sve sličice. Glasnoća po sekundi dolazi iz `recordings.levels`.
+- **Plan** (`src/lib/autoedit.js`, `buildPlan`, bez baze i ffmpeg-a): aktivnost = pola glasnoća, pola pokret, izglađeno na 3 s. Izbacuje se crna slika i slika koja stoji ≥ 3 s; dug miran dio (ispod percentila po jačini reza, duži od 30/14/7 s) ostaje samo na rubovima po 2 s; uz ciljanu dužinu izbacuju se najmirniji blokovi od 5 s. Rupe < 1,5 s se popune, dijelovi < 2 s izbace. Najava = najaktivnijih 12 s u jednom dijelu, ne iz prvog minuta. Poglavlje počinje gdje je izbačen dio ≥ 20 s ili ≥ 5 s učitavanja/menija, ako je prošao barem minut; posljednje mora trajati barem minut.
+- **Render** (`renderAutoEdit` u `studio.js`, traka za videe; `exports.plan`): svaki dio (intro, najava, dijelovi snimka, outro) se kodira u isti format (`longvideo.segmentArgs`: veličina, fps do 60, AAC 48 kHz stereo, logo za 16:9, HDR → `zscale`/`tonemap`) u privremeni folder, pa ih concat demuxer spoji kopiranjem slike uz `loudnorm` (−14 LUFS). Najava se zatamni na kraju, prvi dio otvori iz crnog. Paket za objavu (`kits`) se popuni naslovom i opisom s poglavljima pri pravljenju.
+
+### 4.11d Shortsi iz kompilacije (po scenama)
+
+Stranica `/recordings/:id/scenes`. **Pregled** (`scenes`, posao u glavnoj traci, `longvideo.sceneScan`): ffmpeg dekodira sve sličice (umanjene na 320 px), `select` uzima one sa `scene ≥ 0,15` i svaku desetu, a `metadata=print` daje vrijeme, jačinu promjene i prosječnu svjetlinu (`signalstats` YAVG < 18 = crna slika). Čuvaju se i slabiji rezovi, pa se osjetljivost mijenja bez ponovnog pregleda. **Scene** (`src/lib/scenes.js`, `buildScenes`): rez se računa iznad praga (0,2 / 0,32 / 0,45), crne scene kraće od 3 s se izbace, a scene kraće od izabrane dužine (najmanje 15 s, `MIN_SHORT`) pripoje kraćoj susjednoj. Pri pravljenju `pickScenes` uzima izabrane scene po rednom broju (podešavanja liste stižu u skrivenim poljima), primijeni spajanja i izabranu scenu kraću od minimuma spoji sa kraćom susjednom, i kad ta nije izabrana. Scena duža od 180 s se dijeli na jednake dijelove (`shortsFor`). Svaka izabrana scena je običan Short (`createClip`), uz logo i lanac titlova kao kod dijeljenja snimka. Kadrovi za sličice (`/recordings/:id/frame/:sec`) se prave jednom; fajl dobije ime tek kad je gotov.
+
 ### 4.12 Clipping (kampanje)
 
 Odvojena sekcija za clipping kampanje, u kojima se po zadanim pravilima klipa tuđa epizoda. Ostatak aplikacije nije mijenjan: klipovi kampanje su u tabeli `clips` s popunjenim `campaign_id` i ne prikazuju se na stranici Shorts ni na stranici snimka.
@@ -224,6 +236,8 @@ Sve je u folderu `data/`, koji nije u gitu.
 | `kits` | Paketi za objavu | `kind` (clip, video, recording), `item_id`, `published_at` |
 | `campaigns` | Clipping kampanje | `recording_id`, `hashtags`, `tag_youtube`…`tag_x`, `banned`, `min_seconds` |
 | `memes` | Biblioteka memova | `duration`, `has_audio` |
+| `activity` | Pokret i crna slika snimka po sekundi (Auto edit) | `motion`, `black` (JSON) |
+| `scenes` | Rezovi u snimku (Shorts from scenes) | `cuts` (JSON: vrijeme i jačina), `black` |
 | `transcripts` | Transkript cijelog snimka | `recording_id`, `status`, `words` (JSON: `{s, e, t}` po riječi) |
 | `posts` | Objave klipa po platformi | `clip_id`, `platform`, `url`, `posted_at` |
 | `settings` | Podešavanja | `caption_style`, `kit_defaults`, `logo` |

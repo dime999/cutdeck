@@ -372,7 +372,7 @@ function clipPage(ctx, { campaign, clip, posts, lines, canEdit }) {
         <label>Hook to<input name="hook_end" value="${hook ? fmtFine(hook.end) : ''}" autocomplete="off"></label>
       </div>
       <label class="check"><input type="checkbox" name="trim_silence" value="1"${trimmed ? ' checked' : ''}> Cut out pauses in the talking</label>
-      ${watermarkCheck(ctx, Boolean(clip.watermark))}
+      ${watermarkCheck(ctx, Boolean(clip.watermark), null)}
       <label>Layout
         <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}"${id === clip.layout ? ' selected' : ''}>${h(n)}</option>`).join('')}</select>
       </label>

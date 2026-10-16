@@ -453,6 +453,8 @@ route(
     const captions = db
       .prepare('SELECT c.clip_id, c.status, c.progress FROM captions c JOIN clips ON clips.id = c.clip_id WHERE clips.user_id=?')
       .all(ctx.user.id);
+    const scans = db.prepare('SELECT a.recording_id, a.status, a.progress FROM activity a JOIN recordings r ON r.id = a.recording_id WHERE r.user_id=?').all(ctx.user.id);
+    const sceneScans = db.prepare('SELECT s.recording_id, s.status, s.progress FROM scenes s JOIN recordings r ON r.id = s.recording_id WHERE r.user_id=?').all(ctx.user.id);
     json(ctx, {
       items: [
         ...recs.map((r) => ({ key: `rec:${r.id}`, status: r.status, progress: r.progress })),
@@ -460,6 +462,8 @@ route(
         ...videos.map((v) => ({ key: `video:${v.id}`, status: v.status, progress: v.progress })),
         ...captions.map((c) => ({ key: `captions:${c.clip_id}`, status: c.status, progress: c.progress })),
         ...transcripts.map((t) => ({ key: `transcript:${t.recording_id}`, status: t.status, progress: t.progress })),
+        ...scans.map((a) => ({ key: `activity:${a.recording_id}`, status: a.status, progress: a.progress })),
+        ...sceneScans.map((s) => ({ key: `scenes:${s.recording_id}`, status: s.status, progress: s.progress })),
       ],
     });
   }
@@ -1016,6 +1020,8 @@ route('POST', '/logo/delete', (ctx) => {
   redirect(ctx, '/logo');
 });
 
+require('./scenes-routes')({ route, html, redirect, flash, readForm, userRecording, watermarkFor, getSetting });
+require('./autoedit-routes')({ route, html, redirect, flash, readForm, sendFile, userRecording, watermarkFor });
 require('./meme-routes')({ route, html, redirect, flash, readForm, json, sendFile, userClip });
 require('./clipping-routes')({ route, html, redirect, flash, readForm, getSetting, watermarkFor });
 
