@@ -133,6 +133,25 @@ Bilo koji redoslijed snimaka, Shortsa i klipova, najviše 30 dijelova. Polje **F
 
 Za Short, video ili snimak: naslov (100), opis (5000), hashtagovi (500), tagovi (500), thumbnail za vodoravne videe, dugmad za kopiranje, skidanje videa, link na YouTube Studio i oznaka "objavljeno". **Save and reuse for new kits** pamti opis, hashtagove i tagove kao početni tekst novih paketa. Tekst piše korisnik; aplikacija ga ne smišlja.
 
+### 4.11a Logo (watermark)
+
+Logo se postavlja jednom (stranica `/logo`, podešavanje `logo`: `{ file, position, size, opacity }`, fajl u `data/brand/`). Kvačica **Add my logo** postoji u formi za Short, za dijeljenje snimka, za ručni klip kampanje, u pregledu prijedloga i u izmjeni klipa; bez postavljenog loga umjesto nje stoji link na stranicu Logo.
+
+- Uz Short se pamti snimak podešavanja u koloni `clips.watermark` (JSON), pa kasnija promjena loga ne mijenja Shortse koji čekaju ili se prave iznova.
+- Logo je drugi ulaz ffmpeg-a i crta se filterom `overlay` nakon rasporeda 9:16, a prije ASS titlova i natpisa (`finishFrame` u `media.js`). Širina je 14/20/28% kadra, odmak 60 px od boka i 150 px od vrha ili 460 px od dna.
+- Short s titlovima nastaje iz Shorta koji već ima logo, pa ga ne crta ponovo.
+- Ako fajl loga nestane, Short nastaje bez loga. Stari fajl se pri zamjeni ili brisanju briše samo ako ga ne čeka nijedan Short.
+
+### 4.11b Memovi
+
+Biblioteka memova (tabela `memes`, fajlovi u `data/memes/`, do 20 s i 100 MB, i GIF i zvukovi). Mem bez slike (`width` je prazan; `probe(..., { audioOnly: true })`, slika omota u MP3 se ne računa kao video) je zvuk: u `memeArgs` nema overlay-a, samo se miješa u zvuk, najviše 8 s i stranica `/clips/:id/memes` za postavljanje memova u gotov Short.
+
+- **Prijedlog mjesta** (`suggestMemeSpots`): glasnoća Shorta po sekundama; uzimaju se najglasnije sekunde (bez praga, pa prijedlog postoji i kad se ništa posebno ne ističe), od 1,5 s od početka do 2 s prije kraja, barem 7 s razmaka, jedna na svakih 10 s a najviše tri. Mem počinje 0,6 s poslije vrha. Memovi se dijele redom iz biblioteke, pomjereno po broju Shorta.
+- **Rezultat** je novi Short (`source_clip_id` = original, kolona `memes` = JSON postavki), kao Short s titlovima. Pravi ga `renderMemes` u jednom ffmpeg prolazu: svaki mem je zaseban ulaz (`-t` = koliko se prikazuje). `geq` mu alfa kanalom zaobli uglove (6% širine), `fade` po alfi ga pojavi (0,2 s) i ugasi (0,22 s), a `setpts` ga pomjeri na svoje vrijeme. Sjena je ista kartica, pocrnjena, proširena za 40 px i razmazana `boxblur`-om. Oboje crta `overlay` sa `y` izrazom: ulazak po krivoj easeOutBack (110 px, 0,32 s, s malim prebačajem), izlazak spuštanjem 70 px. Zvuk igre se `volume` izrazom glatko spusti na 35% (0,15 s) i vrati (0,25 s); zvuk mema dobije kratko utišavanje na kraju, pomjeri se `adelay`-om i doda `amix`-om. Pregled u pregledniku koristi istu krivu (cubic-bezier 0.34, 1.56, 0.64, 1).
+- **Efekti na snimku** (`src/lib/effects.js`, kolona `memes.effect`, a u postavci `effect`): `effectChain` slaže lanac koji ide na snimak prije memova. Zum i trešnja su jedan `zoompan` (d=1, stalna veličina 1080×1920, fps izvora) čiji `z`, `x` i `y` zbrajaju doprinose svih memova preko omotnice vremena `it`; trešnja traži malo dodatnog zuma da ima prostora za pomak. Boje i bljeskovi su `eq`, `hue`, `vignette`, `rgbashift` i `drawbox` sa `enable` za vrijeme mema. Podrazumijevani efekat se pogađa po imenu (`guessEffect`); postojeći memovi ga dobiju pri pokretanju.
+- **Pregled u pregledniku** pokazuje mem preko playera istom animacijom (CSS), u istom položaju i veličini, a efekat kao CSS na playeru (`data-fx` na `#meme-stage`).
+- Obrisan mem se pri pravljenju preskače; ako ne ostane nijedan, Short ne uspije uz jasnu poruku.
+
 ### 4.12 Clipping (kampanje)
 
 Odvojena sekcija za clipping kampanje, u kojima se po zadanim pravilima klipa tuđa epizoda. Ostatak aplikacije nije mijenjan: klipovi kampanje su u tabeli `clips` s popunjenim `campaign_id` i ne prikazuju se na stranici Shorts ni na stranici snimka.
@@ -204,9 +223,10 @@ Sve je u folderu `data/`, koji nije u gitu.
 | `exports` | Gotovi videi | `parts` (JSON: redoslijed dijelova, `main` označava dio koji daje veličinu), `status` |
 | `kits` | Paketi za objavu | `kind` (clip, video, recording), `item_id`, `published_at` |
 | `campaigns` | Clipping kampanje | `recording_id`, `hashtags`, `tag_youtube`…`tag_x`, `banned`, `min_seconds` |
+| `memes` | Biblioteka memova | `duration`, `has_audio` |
 | `transcripts` | Transkript cijelog snimka | `recording_id`, `status`, `words` (JSON: `{s, e, t}` po riječi) |
 | `posts` | Objave klipa po platformi | `clip_id`, `platform`, `url`, `posted_at` |
-| `settings` | Podešavanja | `caption_style`, `kit_defaults` |
+| `settings` | Podešavanja | `caption_style`, `kit_defaults`, `logo` |
 
 Napomene:
 
@@ -320,6 +340,9 @@ Nakon premotavanja preglednik javi `seeked` prije nego što je kadar dostupan za
 | `GET`, `POST /clipping/:id/suggest`, `POST /clipping/:id/cancel` | Pregled predloženih scena, klipovi iz označenih, prekid nedovršenih |
 | `POST /clipping/clips/:id/edit` | Izmjena gotovog klipa i ponovno pravljenje |
 | `POST /clipping/:id/clips/delete` | Brisanje označenih klipova kampanje |
+| `GET`, `POST /logo`, `PUT /api/logo`, `POST /logo/delete`, `GET /logo/file` | Logo za watermark: stranica, podešavanja, slanje slike, brisanje |
+| `GET /memes`, `PUT /api/memes`, `POST /memes/:id/rename`, `POST /memes/:id/delete`, `GET /memes/:id/file`, `GET /memes/:id/thumb` | Biblioteka memova |
+| `GET`, `POST /clips/:id/memes` | Memovi u Shortu (`?suggest=1` predloži mjesta), novi Short sa memovima |
 | `GET`, `POST /clipping/clips/:id`, `POST /clipping/clips/:id/delete` | Provjera pravila, tekst i evidencija objava; brisanje klipa |
 | `GET …/file`, `GET …/thumb` | Video i slike, uz podršku za Range |
 | `GET /api/studio/status` | Stanje poslova za osvježavanje stranica (`?campaign=N` za klipove kampanje, `?all=1` za bočni meni) |

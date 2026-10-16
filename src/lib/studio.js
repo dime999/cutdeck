@@ -6,6 +6,7 @@ const path = require('node:path');
 const cfg = require('./config');
 const db = require('./db');
 const media = require('./media');
+const effects = require('./effects');
 
 const VIDEO_EXT = /\.(mp4|mov|m4v|mkv|webm|avi|mts|ts)$/i;
 const MIN_CLIP = 3;
@@ -42,13 +43,13 @@ function scan(userId) {
   return added;
 }
 
-function createClip(rec, { title, start, end, layout, followup = null }) {
+function createClip(rec, { title, start, end, layout, followup = null, watermark = null }) {
   const file = path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`);
   const r = db
     .prepare(
-      'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, followup, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, followup, watermark, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     )
-    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, followup ? JSON.stringify(followup) : null, db.now());
+    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, followup ? JSON.stringify(followup) : null, watermark, db.now());
   tick();
   return Number(r.lastInsertRowid);
 }
@@ -152,16 +153,31 @@ async function renderClip(id, signal) {
   }
   db.prepare("UPDATE clips SET status='rendering', progress=0, error=NULL WHERE id=?").run(id);
   try {
-    const length = clip.end_s - clip.start_s;
+    const length = clip.length_s || clip.end_s - clip.start_s;
     const onProgress = progressSetter('clips', id);
+    const logo = clip.watermark ? JSON.parse(clip.watermark) : null;
     if (clip.edl) {
       // Klip iz kampanje: dijelovi izvora, vertikalni kadar i titlovi u jednom prolazu.
-      await media.renderEdl({ input: source.path, output: clip.path, edl: JSON.parse(clip.edl), layout: clip.layout, overlay: clip.subtitles }, onProgress, signal);
+      await media.renderEdl({ input: source.path, output: clip.path, edl: JSON.parse(clip.edl), layout: clip.layout, overlay: clip.subtitles, logo }, onProgress, signal);
+    } else if (clip.memes) {
+      // Short sa memovima: memovi koji su u međuvremenu obrisani se preskaču.
+      const find = db.prepare('SELECT * FROM memes WHERE id=?');
+      const placements = JSON.parse(clip.memes)
+        .map((p) => ({ ...p, meme: find.get(p.meme_id) }))
+        .filter((p) => p.meme && fs.existsSync(p.meme.path) && p.at < length - 0.3)
+        .map((p) => {
+          const sound = !p.meme.width; // zvuk bez slike
+          const show = Math.min(p.meme.duration, sound ? media.MEME_SOUND_MAX : media.MEME_MAX_SHOW, length - p.at);
+          return { path: p.meme.path, at: p.at, show, position: p.position, size: p.size, hasAudio: Boolean(p.meme.has_audio), width: p.meme.width, height: p.meme.height, sound, effect: p.effect || p.meme.effect || 'none' };
+        });
+      const info = await media.probe(source.path);
+      if (!placements.length) throw new Error('None of the memes of this Short exists any more.');
+      await media.renderMemes({ input: source.path, output: clip.path, placements, hasAudio: info.hasAudio, fps: info.fps, duration: length }, onProgress, signal);
     } else if (fromShort) {
       await media.renderCaptioned({ input: source.path, output: clip.path, subtitles: clip.subtitles, duration: length }, onProgress, signal);
     } else {
       const overlay = clip.label ? media.buildLabelAss(JSON.parse(clip.label), media.SHORT_SIZE) : null;
-      await media.renderShort({ input: source.path, output: clip.path, start: clip.start_s, duration: length, layout: clip.layout, overlay }, onProgress, signal);
+      await media.renderShort({ input: source.path, output: clip.path, start: clip.start_s, duration: length, layout: clip.layout, overlay, logo }, onProgress, signal);
     }
     await media.thumbnail(clip.path, thumbPath('clip', id), Math.min(1, length / 2), 360).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
     db.prepare("UPDATE clips SET status='ready', progress=100, size=? WHERE id=?").run(fs.statSync(clip.path).size, id);
@@ -184,6 +200,49 @@ async function addBumper(userId, file, name, size) {
   const id = Number(r.lastInsertRowid);
   await media.thumbnail(file, thumbPath('bumper', id), Math.min(1, info.duration / 2), 480).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
   return id;
+}
+
+// ── Memovi ──
+async function addMeme(userId, file, name, size, info) {
+  const r = db
+    .prepare('INSERT INTO memes (user_id, name, path, size, duration, width, height, has_audio, effect, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(userId, name, file, size, info.duration, info.width, info.height, info.hasAudio ? 1 : 0, effects.guessEffect(name, info.hasVideo === false), db.now());
+  const id = Number(r.lastInsertRowid);
+  if (info.hasVideo !== false) {
+    await media.thumbnail(file, thumbPath('meme', id), Math.min(0.5, info.duration / 2), 360).catch((e) => console.warn(`[studio] thumbnail: ${e.message}`));
+  }
+  return id;
+}
+
+function deleteMeme(meme) {
+  removeFile(meme.path);
+  fs.rm(thumbPath('meme', meme.id), { force: true }, () => {});
+  db.prepare('DELETE FROM memes WHERE id=?').run(meme.id);
+}
+
+/** Novi Short: postojeći Short sa memovima preko njega. Original ostaje. */
+function createMemeClip(clip, placements) {
+  const r = db
+    .prepare(
+      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, source_clip_id, length_s, memes, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      clip.user_id,
+      clip.recording_id,
+      clip.recording_name,
+      `${clip.title.slice(0, 92)} (memes)`,
+      clip.start_s,
+      clip.end_s,
+      clip.layout,
+      path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`),
+      clip.id,
+      clip.length_s,
+      JSON.stringify(placements),
+      db.now()
+    );
+  tick();
+  return Number(r.lastInsertRowid);
 }
 
 /** `parts` je redoslijed dijelova: [{kind: 'bumper'|'recording'|'clip', id, name, main?}]. */
@@ -386,10 +445,10 @@ function splitRanges(duration, length) {
  * Reže cijeli snimak na Shorts. `label` (npr. { word: 'PART', position: 'top' }) upisuje
  * redni broj dijela u sliku; `followup` je lanac koji slijedi za svaki dio.
  */
-function splitRecording(rec, { length, layout, prefix, label = null, followup = null }) {
+function splitRecording(rec, { length, layout, prefix, label = null, followup = null, watermark = null }) {
   const ranges = splitRanges(rec.duration, length);
   const insert = db.prepare(
-    'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, label, followup, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, label, followup, watermark, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   db.transaction(() => {
     ranges.forEach((range, i) => {
@@ -406,6 +465,7 @@ function splitRecording(rec, { length, layout, prefix, label = null, followup = 
         label ? JSON.stringify({ text: `${label.word} ${i + 1}`, position: label.position }) : null,
         // Međukorak bez titlova se briše kad Short sa titlovima bude gotov, da ne ostanu dupli.
         followup ? JSON.stringify({ ...followup, title, cleanup: true }) : null,
+        watermark,
         db.now()
       );
     });
@@ -478,22 +538,22 @@ async function transcribeRecording(id, signal) {
 }
 
 /** Klip kampanje: složen iz dijelova izvora (edl), sa titlovima koji se upisuju u istom prolazu. */
-function createCampaignClip(rec, { campaignId, title, start, end, layout, edl, length, subtitles, lines = null }) {
+function createCampaignClip(rec, { campaignId, title, start, end, layout, edl, length, subtitles, lines = null, watermark = null }) {
   const file = path.join(cfg.shortsDir, `${crypto.randomBytes(16).toString('hex')}.mp4`);
   const r = db
     .prepare(
-      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, campaign_id, edl, length_s, subtitles, cap_lines, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO clips (user_id, recording_id, recording_name, title, start_s, end_s, layout, path, campaign_id, edl, length_s, subtitles, cap_lines, watermark, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, campaignId, JSON.stringify(edl), length, subtitles, lines ? JSON.stringify(lines) : null, db.now());
+    .run(rec.user_id, rec.id, rec.name, title, start, end, layout, file, campaignId, JSON.stringify(edl), length, subtitles, lines ? JSON.stringify(lines) : null, watermark, db.now());
   tick();
   return Number(r.lastInsertRowid);
 }
 
 /** Izmijenjen klip kampanje se pravi iznova, u isti fajl; objave i opis ostaju. */
-function rerenderCampaignClip(id, { start, end, layout, edl, length, subtitles, lines }) {
-  db.prepare("UPDATE clips SET start_s=?, end_s=?, layout=?, edl=?, length_s=?, subtitles=?, cap_lines=?, status='pending', progress=0, error=NULL WHERE id=?").run(
-    start, end, layout, JSON.stringify(edl), length, subtitles, lines ? JSON.stringify(lines) : null, id
+function rerenderCampaignClip(id, { start, end, layout, edl, length, subtitles, lines, watermark = null }) {
+  db.prepare("UPDATE clips SET start_s=?, end_s=?, layout=?, edl=?, length_s=?, subtitles=?, cap_lines=?, watermark=?, status='pending', progress=0, error=NULL WHERE id=?").run(
+    start, end, layout, JSON.stringify(edl), length, subtitles, lines ? JSON.stringify(lines) : null, watermark, id
   );
   tick();
 }
@@ -512,4 +572,4 @@ async function recordingLevels(rec) {
   }
 }
 
-module.exports = { rerenderCampaignClip, recordingLevels, MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, requestTranscript, createCampaignClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };
+module.exports = { addMeme, deleteMeme, createMemeClip, rerenderCampaignClip, recordingLevels, MIN_CLIP, MAX_CLIP, MIN_PART, thumbPath, scan, createClip, requestTranscript, createCampaignClip, splitRanges, splitRecording, addBumper, createExport, cancelExport, requestCaptions, createCaptionedClip, deleteClip, cancelClip, cancelShorts, start, tick };

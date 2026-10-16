@@ -18,6 +18,16 @@ function getSetting(userId, key, fallback) {
   const row = db.prepare('SELECT value FROM settings WHERE user_id=? AND key=?').get(userId, key);
   return row ? JSON.parse(row.value) : fallback;
 }
+// Logo za watermark ili null; fajl koji je nestao sa diska se ne računa.
+function currentLogo(userId) {
+  const logo = getSetting(userId, 'logo', null);
+  return logo && logo.file && fs.existsSync(logo.file) ? logo : null;
+}
+// Snimak podešavanja loga za Short, ako je u formi označeno „Add my logo“.
+function watermarkFor(ctx, form) {
+  const logo = form.get('watermark') === '1' ? currentLogo(ctx.user.id) : null;
+  return logo ? JSON.stringify(logo) : null;
+}
 function setSetting(userId, key, value) {
   db.prepare('INSERT INTO settings (user_id, key, value) VALUES (?, ?, ?) ON CONFLICT(user_id, key) DO UPDATE SET value=excluded.value').run(userId, key, JSON.stringify(value));
 }
@@ -110,6 +120,7 @@ async function handle(req, res) {
   if (url.pathname.startsWith('/static/')) return serveStatic(req, res, url.pathname);
 
   const ctx = { req, res, url, path: url.pathname, query: url.searchParams, user: LOCAL_USER, flash: readFlash(req), params: {} };
+  ctx.logo = currentLogo(LOCAL_USER.id); // da forme znaju ima li logo za kvačicu „Add my logo“
 
   if (['POST', 'PUT', 'DELETE'].includes(req.method) && !sameOrigin(req)) {
     return html(ctx, views.errorPage(ctx, 403, 'The request did not come from this site.'), 403);
@@ -326,7 +337,7 @@ route(
     const outro = bumperId('auto_outro');
     const followup =
       captions || intro || outro ? { captions, style: getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE), intro, outro, title } : null;
-    studio.createClip(rec, { title, start, end: Math.min(end, rec.duration), layout, followup });
+    studio.createClip(rec, { title, start, end: Math.min(end, rec.duration), layout, followup, watermark: watermarkFor(ctx, form) });
     const steps = [captions && 'captions', intro && 'the intro', outro && 'the outro'].filter(Boolean);
     const list = steps.length > 1 ? `${steps.slice(0, -1).join(', ')} and ${steps[steps.length - 1]}` : steps[0];
     flash(
@@ -498,7 +509,7 @@ route('POST', '/recordings/:id/split', async (ctx) => {
   const outro = bumperId('auto_outro');
   const followup = captions || intro || outro ? { captions, style: getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE), intro, outro } : null;
 
-  studio.splitRecording(rec, { length, layout, prefix, label, followup });
+  studio.splitRecording(rec, { length, layout, prefix, label, followup, watermark: watermarkFor(ctx, form) });
   flash(ctx, 'ok', `${count} ${count === 1 ? 'Short is' : 'Shorts are'} being created from “${rec.name}”. This page updates as they finish.`);
   redirect(ctx, '/shorts');
 });
@@ -939,7 +950,74 @@ route('POST', '/publish/:kind/:id', async (ctx) => {
 });
 
 // ── Sekcija Clipping (vlastiti fajlovi: clipping-routes.js, clipping-views.js, lib/clipping.js) ──
-require('./clipping-routes')({ route, html, redirect, flash, readForm, getSetting });
+// ── Logo (watermark) ─────────────────────────────────────
+const MAX_LOGO_BYTES = 10 * 1024 ** 2;
+// Prepoznaje sliku po prvim bajtovima, ne po imenu fajla.
+function imageType(buf) {
+  if (buf.length > 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return '.png';
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return '.jpg';
+  if (buf.length > 12 && buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') return '.webp';
+  return null;
+}
+
+route('GET', '/logo', (ctx) => html(ctx, views.logoPage(ctx, { logo: getSetting(ctx.user.id, 'logo', null), ffmpegOk: media.isAvailable() })));
+
+route('GET', '/logo/file', (ctx) => {
+  const logo = currentLogo(ctx.user.id);
+  if (!logo) return html(ctx, views.errorPage(ctx, 404, 'No logo has been added yet.'), 404);
+  sendFile(ctx, logo.file);
+});
+
+route('PUT', '/api/logo', async (ctx) => {
+  // Tijelo se pročita do kraja i kad je preveliko, da preglednik dobije odgovor umjesto prekinute veze.
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of ctx.req) {
+    size += chunk.length;
+    if (size <= MAX_LOGO_BYTES) chunks.push(chunk);
+  }
+  if (!size) return json(ctx, { error: 'The file is empty.' }, 400);
+  if (size > MAX_LOGO_BYTES) return json(ctx, { error: 'The logo is larger than 10 MB.' }, 413);
+  const buf = Buffer.concat(chunks);
+  const ext = imageType(buf);
+  if (!ext) return json(ctx, { error: 'Choose a PNG, JPG or WebP image. PNG with a transparent background looks best.' }, 400);
+
+  const file = path.join(cfg.brandDir, `logo-${crypto.randomBytes(8).toString('hex')}${ext}`);
+  fs.writeFileSync(file, buf);
+  const old = getSetting(ctx.user.id, 'logo', null);
+  setSetting(ctx.user.id, 'logo', { ...media.DEFAULT_LOGO, ...(old || {}), file });
+  // Stari fajl se briše samo ako ga ne koristi nijedan Short koji još čeka na red.
+  if (old && old.file && old.file !== file && !db.prepare("SELECT 1 FROM clips WHERE status IN ('pending', 'rendering') AND watermark LIKE ?").get(`%${path.basename(old.file)}%`)) {
+    fs.rm(old.file, { force: true }, () => {});
+  }
+  flash(ctx, 'ok', 'Your logo has been added. Tick “Add my logo” when you create a Short to put it on the video.');
+  json(ctx, { redirect: '/logo' });
+});
+
+route('POST', '/logo', async (ctx) => {
+  const form = await readForm(ctx.req);
+  const logo = getSetting(ctx.user.id, 'logo', null);
+  if (!logo) return redirect(ctx, '/logo');
+  const position = media.LOGO_POSITIONS.some(([id]) => id === form.get('position')) ? form.get('position') : logo.position;
+  const size = form.get('size') in media.LOGO_SIZES ? form.get('size') : logo.size;
+  const opacity = Math.round(Math.max(10, Math.min(100, Number(form.get('opacity')) || logo.opacity)));
+  setSetting(ctx.user.id, 'logo', { ...logo, position, size, opacity });
+  flash(ctx, 'ok', 'Saved. New Shorts with your logo use these settings; Shorts already created stay as they are.');
+  redirect(ctx, '/logo');
+});
+
+route('POST', '/logo/delete', (ctx) => {
+  const logo = getSetting(ctx.user.id, 'logo', null);
+  db.prepare("DELETE FROM settings WHERE user_id=? AND key='logo'").run(ctx.user.id);
+  if (logo && logo.file && !db.prepare("SELECT 1 FROM clips WHERE status IN ('pending', 'rendering') AND watermark LIKE ?").get(`%${path.basename(logo.file)}%`)) {
+    fs.rm(logo.file, { force: true }, () => {});
+  }
+  flash(ctx, 'ok', 'The logo has been removed. Shorts already created keep it.');
+  redirect(ctx, '/logo');
+});
+
+require('./meme-routes')({ route, html, redirect, flash, readForm, json, sendFile, userClip });
+require('./clipping-routes')({ route, html, redirect, flash, readForm, getSetting, watermarkFor });
 
 // ── Javne stranice ────────────────────────────────────────
 route('GET', '/privacy', (ctx) => html(ctx, views.privacyPage(ctx)));

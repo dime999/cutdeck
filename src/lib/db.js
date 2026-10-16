@@ -11,7 +11,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const cfg = require('./config');
 
-for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir, cfg.thumbnailsDir, cfg.bumpersDir, cfg.videosDir, cfg.tmpDir]) {
+for (const dir of [cfg.recordingsDir, cfg.shortsDir, cfg.thumbsDir, cfg.thumbnailsDir, cfg.bumpersDir, cfg.brandDir, cfg.memesDir, cfg.videosDir, cfg.tmpDir]) {
   fs.mkdirSync(dir, { recursive: true });
 }
 const db = new DatabaseSync(path.join(cfg.dataDir, 'app.db'));
@@ -84,6 +84,20 @@ CREATE TABLE IF NOT EXISTS thumbnails (
 );
 
 -- Intro i outro klipovi
+-- Memovi: kratki klipovi koji iskaču preko Shorta
+CREATE TABLE IF NOT EXISTS memes (
+  id         INTEGER PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name       TEXT NOT NULL,
+  path       TEXT NOT NULL,
+  size       INTEGER NOT NULL,
+  duration   REAL NOT NULL,
+  width      INTEGER,
+  height     INTEGER,
+  has_audio  INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS bumpers (
   id         INTEGER PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -208,6 +222,17 @@ addColumn('clips', 'length_s', 'REAL');
 addColumn('clips', 'caption', 'TEXT');
 // Redovi titlova klipa kampanje (JSON), da se riječi mogu ispraviti i klip ponovo napraviti.
 addColumn('clips', 'cap_lines', 'TEXT');
+// Logo preko Shorta: snimak podešavanja loga u trenutku pravljenja (JSON), ili prazno bez loga.
+addColumn('clips', 'watermark', 'TEXT');
+// Short sa memovima: gdje iskače koji mem (JSON: [{ meme_id, at, position, size }]); nastaje iz drugog Shorta.
+addColumn('clips', 'memes', 'TEXT');
+// Efekat na videu koji prati mem (npr. zum uz Vine boom); memovi dodani prije ovoga ga dobiju po imenu.
+addColumn('memes', 'effect', 'TEXT');
+{
+  const { guessEffect } = require('./effects');
+  const setEffect = db.prepare('UPDATE memes SET effect=? WHERE id=?');
+  for (const m of db.prepare('SELECT id, name, width FROM memes WHERE effect IS NULL').all()) setEffect.run(guessEffect(m.name, !m.width), m.id);
+}
 // Glasnoća snimka u decibelima za svaku sekundu (JSON); iz nje se biraju hook i prijedlozi klipova.
 addColumn('recordings', 'levels', 'TEXT');
 

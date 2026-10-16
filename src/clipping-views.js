@@ -1,6 +1,6 @@
 'use strict';
 // Stranice sekcije Clipping: kampanje, radni prostor jedne kampanje i stranica klipa.
-const { h, icon, crumb, emptyState, meta, layout, fmtTime, fmtSize, progressBar, studioPoll } = require('./views');
+const { h, icon, crumb, watermarkCheck, emptyState, meta, layout, fmtTime, fmtSize, progressBar, studioPoll } = require('./views');
 const { LAYOUTS } = require('./lib/media');
 const { PLATFORMS, withPrefix, bannedList, checkClip, platformCaption } = require('./lib/clipping');
 
@@ -158,6 +158,7 @@ function campaignPage(ctx, { campaign, rec, transcript, lines, clips, recordings
 
       <h2>Edit</h2>
       <label class="check"><input type="checkbox" name="trim_silence" value="1" data-remember="clip-trim" checked> Cut out pauses in the talking</label>
+      ${watermarkCheck(ctx)}
       <label>Layout
         <select name="layout" data-remember="clip-layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
       </label>
@@ -323,6 +324,7 @@ function suggestPage(ctx, { campaign, rec, scenes, count, target, ffmpegOk }) {
       <h2>For every clip</h2>
       <label class="check"><input type="checkbox" name="auto_hook" value="1" data-remember="clip-autohook" checked> Open with the hook shown under each scene</label>
       <label class="check"><input type="checkbox" name="trim_silence" value="1" data-remember="clip-trim" checked> Cut out pauses in the talking</label>
+      ${watermarkCheck(ctx)}
       <label>Layout
         <select name="layout" data-remember="clip-layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
       </label>
@@ -370,6 +372,7 @@ function clipPage(ctx, { campaign, clip, posts, lines, canEdit }) {
         <label>Hook to<input name="hook_end" value="${hook ? fmtFine(hook.end) : ''}" autocomplete="off"></label>
       </div>
       <label class="check"><input type="checkbox" name="trim_silence" value="1"${trimmed ? ' checked' : ''}> Cut out pauses in the talking</label>
+      ${watermarkCheck(ctx, Boolean(clip.watermark))}
       <label>Layout
         <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}"${id === clip.layout ? ' selected' : ''}>${h(n)}</option>`).join('')}</select>
       </label>

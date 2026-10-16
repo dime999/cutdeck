@@ -9,6 +9,8 @@ Radi na tvom računaru, besplatna je i nema vanjskih biblioteka: trebaju ti samo
 - Predlaže najglasnije trenutke svakog snimka kao kandidate za Shorts.
 - Reže izabrani dio u vertikalni Short (1080×1920), sa cijelim kadrom na zamućenoj pozadini ili izrezom dijela slike.
 - Pravi thumbnail (JPG 1280×720) od kadra iz snimka, sa tekstom i doradom slike.
+- Ubacuje memove iz tvoje biblioteke preko Shorta: sam predloži mjesta na glasnim trenucima, ili ih postaviš ručno.
+- Po izboru stavlja tvoj logo (watermark) u ugao Shorta ili klipa.
 - Dodaje intro i outro na cijeli snimak ili na Short i pravi gotov video.
 - Spaja više videa (snimke, Shorts, intro i outro klipove) u jedan, redom koji zadaš.
 - Pravi engleske titlove iz tvog govora u Shortu i upisuje ih u sliku, sa isticanjem riječi koja se izgovara.
@@ -75,6 +77,25 @@ Ostatak od nekoliko sekundi na kraju pripaja se posljednjem dijelu, a duži osta
 5. Klikni **Save thumbnail**. Gotovi thumbnailovi su na stranici **Thumbnails**, odakle ih skidaš dugmetom **Download**.
 
 Spremljeni thumbnail se ne može naknadno uređivati; za izmjenu napravi novi.
+
+## Memovi
+
+1. Na stranici **Memes** dodaj kratke reakcijske klipove (MP4, MOV, WebM, MKV ili GIF) i meme zvukove (MP3, WAV, OGG, M4A), do 20 sekundi. Zvuk se u Shortu samo čuje, ništa ne iskače; za zvuk + sliku stavi zvuk i klip na istu sekundu. Na pločici zvuka je dugme **Play**.
+2. Na stranici **Shorts**, u meniju Shorta (tri tačke), izaberi **Memes**. Aplikacija odmah predloži mjesta: najglasnije trenutke Shorta, do tri, barem 7 sekundi jedan od drugog, i uz svaki mem iz biblioteke.
+3. Pusti Short: memovi iskaču preko playera tačno kako će izgledati. Za svaki mem možeš promijeniti koji je, kada počinje (**Now** uzme vrijeme iz playera), gdje stoji (gore, sredina, dole) i koliki je. **Add meme here** dodaje mem na mjesto gdje je player zaustavljen.
+**Efekti uz zvukove.** Svaki mem nosi efekat na samom snimku igre dok traje: Punch zoom (brzi zum), Screen shake (trešnja), Hype (trešnja, pulsirajući zum i jače boje), Zoom with dark edges, Sad (crno-bijelo i spori zum) ili Glitch (trzaj, pomak boja i crveni bljesak). Novi zvuk dobije efekat po imenu (Vine boom → zum, metal pipe → trešnja, airhorn → hype, violina → sad, error → glitch); u biblioteci ga mijenjaš uz ime (**Save**), a za jedan Short u koloni **Effect**. Pregled pokazuje efekat na playeru.
+
+4. Klikni **Create Short with memes**. Nastaje novi Short s nastavkom "(memes)", a original ostaje.
+
+Mem je kartica sa zaobljenim uglovima i mekom sjenom. Ulazi odskokom: izleti odozdo, prebaci malo iznad svog mjesta i smiri se, uz pojavljivanje; na kraju se spusti i izblijedi. Traje najviše 5 sekundi, a zvuk igre se dok traje glatko utiša. Ime mema mijenjaš direktno na njegovoj pločici (**Rename**). Memove skidaš sam: većina su isječci iz tuđih filmova i videa, pa vrijede ista pravila o autorskim pravima kao za ostali tuđi materijal.
+
+## Logo (watermark)
+
+1. Na stranici **Logo watermark** dodaj svoj logo jednom: PNG s providnom pozadinom izgleda najbolje, a radi i JPG ili WebP (do 10 MB).
+2. Izaberi ugao, veličinu i vidljivost. Pregled pokazuje gdje će logo stajati u vertikalnom Shortu.
+3. Kad praviš Short, dijeliš snimak na dijelove ili praviš klip u kampanji, štikliraj **Add my logo**. Bez kvačice video ostaje čist.
+
+Logo se crta ispod titlova i odmaknut je od dugmadi i teksta koje TikTok i YouTube crtaju preko videa. Kad se Shortu dodaju titlovi, logo ostaje. Promjena podešavanja ili brisanje loga ne mijenja Shortse koji su već napravljeni. Klipu kampanje logo možeš uključiti ili isključiti i naknadno, u **Edit clip**.
 
 ## Intro i outro
 
@@ -152,6 +173,7 @@ Aplikacija ne može provjeriti da li je snimak iz prave epizode, da li je klip p
 - `data/app.db` je baza (snimci, Shorts, thumbnailovi, klipovi i gotovi videi).
 - `data/recordings/` su tvoji snimci gameplaya.
 - `data/shorts/` su izrezani Shorts, a `data/thumbnails/` thumbnailovi koje si napravio.
+- `data/brand/` je tvoj logo, a `data/memes/` tvoji memovi.
 - `data/bumpers/` su intro i outro klipovi, a `data/videos/` gotovi videi.
 - `data/models/` je model za prepoznavanje govora.
 - `data/thumbs/` su sličice za prikaz u aplikaciji.

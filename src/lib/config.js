@@ -30,6 +30,8 @@ module.exports = {
   thumbsDir: path.join(ROOT, 'data', 'thumbs'),
   thumbnailsDir: path.join(ROOT, 'data', 'thumbnails'),
   bumpersDir: path.join(ROOT, 'data', 'bumpers'),
+  brandDir: path.join(ROOT, 'data', 'brand'),
+  memesDir: path.join(ROOT, 'data', 'memes'),
   videosDir: path.join(ROOT, 'data', 'videos'),
   tmpDir: path.join(ROOT, 'data', 'tmp'),
   // Model za prepoznavanje engleskog govora (whisper.cpp); skida se jednom, vidi README.

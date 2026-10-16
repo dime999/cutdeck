@@ -654,6 +654,214 @@ if (bumperForm) {
   });
 }
 
+// ── Logo (watermark): slanje slike i pregled položaja ─────
+const logoForm = document.getElementById('logo-form');
+if (logoForm) {
+  const errorBox = document.getElementById('logo-error');
+  const button = logoForm.querySelector('button');
+  const input = document.getElementById('logo-file');
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    document.getElementById('logo-drop-text').textContent = file ? file.name : 'Choose an image or drag it here';
+    document.getElementById('logo-drop').classList.toggle('has-file', Boolean(file));
+  });
+  logoForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const file = input.files[0];
+    if (!file) return;
+    errorBox.hidden = true;
+    button.disabled = true;
+    try {
+      const res = await fetch('/api/logo', { method: 'PUT', body: file });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.redirect) return (location.href = data.redirect);
+      errorBox.textContent = data.error || `The logo could not be added (error ${res.status}).`;
+    } catch {
+      errorBox.textContent = 'The logo could not be added because the app did not respond.';
+    }
+    errorBox.hidden = false;
+    button.disabled = false;
+  });
+}
+const wmForm = document.getElementById('wm-form');
+if (wmForm) {
+  const preview = document.getElementById('wm-preview');
+  const logo = document.getElementById('wm-logo');
+  const sizes = { small: 14, medium: 20, large: 28 };
+  const show = () => {
+    preview.dataset.position = wmForm.position.value;
+    logo.style.width = `${sizes[wmForm.size.value]}%`;
+    logo.style.opacity = wmForm.opacity.value / 100;
+    document.getElementById('wm-opacity-value').textContent = `${wmForm.opacity.value}%`;
+  };
+  wmForm.addEventListener('input', show);
+  wmForm.addEventListener('change', show);
+}
+
+// ── Memovi: dodavanje u biblioteku ────────────────────────
+const memeUpload = document.getElementById('meme-upload');
+if (memeUpload) {
+  const errorBox = document.getElementById('meme-error');
+  const progress = document.getElementById('meme-progress');
+  const button = memeUpload.querySelector('button');
+  const input = document.getElementById('meme-file');
+  input.addEventListener('change', () => {
+    document.getElementById('meme-drop-text').textContent = input.files[0] ? input.files[0].name : 'Choose a video, GIF or sound, or drag it here';
+    document.getElementById('meme-drop').classList.toggle('has-file', Boolean(input.files[0]));
+  });
+  memeUpload.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const file = input.files[0];
+    if (!file) return;
+    errorBox.hidden = true;
+    button.disabled = true;
+    const fail = (message) => {
+      errorBox.textContent = message;
+      errorBox.hidden = false;
+      progress.hidden = true;
+      button.disabled = false;
+    };
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', '/api/memes');
+    xhr.setRequestHeader('x-file-name', encodeURIComponent(file.name));
+    xhr.setRequestHeader('x-name', encodeURIComponent(document.getElementById('meme-name').value));
+    xhr.upload.onprogress = (ev) => {
+      if (!ev.lengthComputable) return;
+      const pct = Math.round((ev.loaded / ev.total) * 100);
+      progress.hidden = false;
+      progress.querySelector('.bar').style.width = `${pct}%`;
+      progress.querySelector('.label').textContent = pct < 100 ? `Copying… ${pct}%` : 'Checking the meme…';
+    };
+    xhr.onload = () => {
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch {}
+      if (xhr.status === 200 && data.redirect) location.href = data.redirect;
+      else fail(data.error || `The meme could not be added (error ${xhr.status}).`);
+    };
+    xhr.onerror = () => fail('The meme could not be added because the app did not respond.');
+    xhr.send(file);
+  });
+}
+
+// Zvučni mem u biblioteci: dugme ga pusti, drugi klik ga zaustavi.
+let soundPlayer = null;
+document.addEventListener('click', (e) => {
+  const button = e.target.closest('[data-play-sound]');
+  if (!button) return;
+  const again = soundPlayer && soundPlayer.button === button && !soundPlayer.paused;
+  if (soundPlayer) {
+    soundPlayer.pause();
+    soundPlayer.button.classList.remove('is-playing');
+    soundPlayer.button.textContent = 'Play';
+  }
+  if (again) return;
+  soundPlayer = new Audio(button.dataset.playSound);
+  soundPlayer.button = button;
+  button.classList.add('is-playing');
+  button.textContent = 'Stop';
+  soundPlayer.addEventListener('ended', () => {
+    button.classList.remove('is-playing');
+    button.textContent = 'Play';
+  });
+  soundPlayer.play().catch(() => {});
+});
+
+// ── Memovi u Shortu: redovi postavki i pregled preko playera ──
+const memeForm = document.getElementById('meme-form');
+if (memeForm) {
+  const player = document.getElementById('meme-player');
+  const stage = document.getElementById('meme-stage');
+  const rows = document.getElementById('meme-rows');
+  const maxShow = Number(memeForm.dataset.maxShow);
+  const maxSound = Number(memeForm.dataset.maxSound);
+  const duration = Number(memeForm.dataset.duration);
+  const empty = () => (document.getElementById('meme-empty').hidden = rows.children.length > 0);
+  const addRow = (at) => {
+    rows.insertAdjacentHTML('beforeend', document.getElementById('meme-row-template').innerHTML);
+    rows.lastElementChild.querySelector('[name="at"]').value = Math.min(at, Math.max(0, duration - 1)).toFixed(1);
+    empty();
+  };
+  document.getElementById('meme-add').addEventListener('click', () => addRow(player.currentTime));
+  // Izbor mema postavi i efekat koji ga obično prati.
+  memeForm.addEventListener('change', (e) => {
+    if (e.target.name !== 'meme_id') return;
+    const option = e.target.selectedOptions[0];
+    if (option) e.target.closest('.meme-row').querySelector('[name="effect"]').value = option.dataset.effect || 'none';
+  });
+  memeForm.addEventListener('click', (e) => {
+    if (e.target.closest('[data-meme-remove]')) {
+      e.target.closest('.meme-row').remove();
+      empty();
+    } else if (e.target.closest('[data-meme-now]')) {
+      e.target.closest('.meme-row').querySelector('[name="at"]').value = player.currentTime.toFixed(1);
+    }
+  });
+
+  // Pregled: dok Short ide, mem iskače preko playera na svom mjestu, s istom animacijom kao u gotovom videu.
+  const shown = new Map(); // red → element mema
+  const sizes = { small: 50, medium: 68, large: 90 };
+  const sync = () => {
+    const t = player.currentTime;
+    const live = new Set();
+    let effect = '';
+    for (const row of rows.querySelectorAll('.meme-row')) {
+      const option = row.querySelector('[name="meme_id"]').selectedOptions[0];
+      const at = Number(row.querySelector('[name="at"]').value);
+      if (!option || Number.isNaN(at)) continue;
+      const sound = option.dataset.sound === '1';
+      const show = Math.min(Number(option.dataset.duration), sound ? maxSound : maxShow);
+      if (t < at || t >= at + show) continue;
+      const fx = row.querySelector('[name="effect"]').value;
+      if (fx && fx !== 'none') effect = fx;
+      live.add(row);
+      let el = shown.get(row);
+      const src = option.dataset.src;
+      if (!el || el.dataset.src !== src) {
+        if (el) el.remove();
+        // Zvuk se samo pusti (nevidljivi element), video i GIF iskaču preko playera.
+        el = document.createElement(sound ? 'audio' : /\.gif$/i.test(option.textContent) ? 'img' : 'video');
+        el.className = sound ? 'meme-audio' : 'meme-pop';
+        el.dataset.src = src;
+        el.src = src;
+        if (el.tagName !== 'IMG') {
+          el.playsInline = true;
+          el.currentTime = t - at;
+          el.play().catch(() => {});
+        }
+        stage.append(el);
+        shown.set(row, el);
+      }
+      // Na pauzi mem ostaje vidljiv, da se vidi gdje stoji; njegov video stoji zajedno sa Shortom.
+      if (el.tagName !== 'IMG') {
+        if (player.paused) el.pause();
+        else if (el.paused) el.play().catch(() => {});
+      }
+      el.dataset.position = row.querySelector('[name="position"]').value;
+      el.style.width = `${sizes[row.querySelector('[name="size"]').value] || 68}%`;
+    }
+    // Efekat na snimku u pregledu: CSS na playeru (zum, trešnja, boje), isti trenutak kao u gotovom videu.
+    if ((stage.dataset.fx || '') !== effect) {
+      if (effect) stage.dataset.fx = effect;
+      else delete stage.dataset.fx;
+    }
+    for (const [row, el] of shown) {
+      if (!live.has(row) || !row.isConnected) {
+        el.remove();
+        shown.delete(row);
+      }
+    }
+  };
+  player.addEventListener('timeupdate', sync);
+  player.addEventListener('pause', sync);
+  player.addEventListener('seeked', sync);
+  // Klik na vrijeme reda pusti Short od tog mjesta, da se mem odmah vidi.
+  memeForm.addEventListener('focusin', (e) => {
+    if (e.target.name === 'at' && e.target.value !== '') player.currentTime = Math.max(0, Number(e.target.value) - 0.5);
+  });
+}
+
 // ── Spajanje više videa ───────────────────────────────────
 const mergeForm = document.getElementById('merge-form');
 if (mergeForm) {

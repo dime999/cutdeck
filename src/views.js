@@ -1,7 +1,7 @@
 'use strict';
 // HTML šabloni. Sve vrijednosti od korisnika prolaze kroz h() (escape).
 const cfg = require('./lib/config');
-const { LAYOUTS, CAPTION_FONTS, DEFAULT_CAPTION_STYLE } = require('./lib/media');
+const { LAYOUTS, CAPTION_FONTS, DEFAULT_CAPTION_STYLE, LOGO_POSITIONS, LOGO_SIZES } = require('./lib/media');
 
 const h = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -24,6 +24,8 @@ const ICONS = {
   external: '<path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5"/>',
   merge: '<path d="M8 2.5 13.5 5.5 8 8.5 2.5 5.5zM2.5 8.5 8 11.5l5.5-3M2.5 11 8 14l5.5-3"/>',
   captions: '<rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M4.5 9.8h3M9 9.8h2.5M4.5 7.5h1.5M7.5 7.5h4"/>',
+  logo: '<rect x="2" y="2.5" width="12" height="11" rx="2"/><rect x="9" y="4.5" width="3.2" height="3.2" rx="0.6" fill="currentColor"/>',
+  memes: '<circle cx="8" cy="8" r="5.5"/><path d="M5.6 9.6c.6.9 1.4 1.3 2.4 1.3s1.8-.4 2.4-1.3"/><circle cx="6.1" cy="6.6" r=".6" fill="currentColor"/><circle cx="9.9" cy="6.6" r=".6" fill="currentColor"/>',
   kit: '<path d="M13.5 2.5 7 9M13.5 2.5 9.5 13.5 7 9 2.5 6.5z"/>',
   stop: '<rect x="4" y="4" width="8" height="8" rx="1.5"/>',
   close: '<path d="M4 4l8 8M12 4l-8 8"/>',
@@ -75,6 +77,8 @@ function layout(ctx, title, body) {
       ${nav('/thumbnails', 'Thumbnails', 'thumbnails')}
       ${nav('/videos', 'Videos', 'videos')}
       ${nav('/bumpers', 'Intros and outros', 'bumpers')}
+      ${nav('/memes', 'Memes', 'memes')}
+      ${nav('/logo', 'Logo watermark', 'logo')}
       <p class="side-label">Clip for campaigns</p>
       ${nav('/clipping', 'Clipping campaigns', 'kit')}
     </nav>
@@ -89,6 +93,12 @@ ${body}
 <script src="/static/app.js" defer></script>
 </body>
 </html>`;
+}
+
+/** Kvačica „Add my logo“; bez postavljenog loga je isključena i vodi na stranicu Logo. */
+function watermarkCheck(ctx, checked = false) {
+  if (!ctx.logo) return `<p class="muted small wm-off">${icon('logo')}No logo yet. <a href="/logo">Add your logo</a> to put it on your Shorts.</p>`;
+  return `<label class="check"><input type="checkbox" name="watermark" value="1"${checked ? ' checked' : ' data-remember="watermark"'}> Add my logo <span class="muted">(${h(ctx.logo.position.replace('-', ' '))})</span></label>`;
 }
 
 function fmtSize(bytes) {
@@ -204,6 +214,7 @@ function shortTiles(clips, { from = '' } = {}) {
                ${menu(
                  `More actions for “${h(c.title)}”`,
                  `<a href="/clips/${c.id}/captions">${icon('captions')}Captions</a>
+                 <a href="/clips/${c.id}/memes?suggest=1">${icon('memes')}Memes</a>
                  <a href="/videos/new?clip=${c.id}">${icon('bumpers')}Intro and outro</a>
                  <hr>
                  ${remove}`
@@ -376,6 +387,7 @@ ${ffmpegNotice(ffmpegOk)}
         <select name="layout">${LAYOUTS.map(([id, n]) => `<option value="${id}">${h(n)}</option>`).join('')}</select>
       </label>
       <label>Title <span class="muted">(optional)</span><input name="title" maxlength="100"></label>
+      ${watermarkCheck(ctx)}
       <h2>Then, without more clicks</h2>
       <label class="check"><input type="checkbox" name="auto_captions" value="1" data-remember="auto-captions"${captionsProblem ? ' disabled' : ''}> Add captions from the voice</label>
       ${captionsProblem ? `<p class="muted small">Captions are not available yet: ${h(captionsProblem)}</p>` : ''}
@@ -554,6 +566,50 @@ ${
     ? `<ul class="thumbs">${tiles}</ul>`
     : emptyState('bumpers', 'No intro or outro clips yet', 'Add the clips you made for your channel. Any clip can be used at the start or at the end of a video.')
 }`
+  );
+}
+
+function logoPage(ctx, { logo, ffmpegOk }) {
+  const option = (list, value) => list.map(([id, name]) => `<option value="${id}"${id === value ? ' selected' : ''}>${h(name)}</option>`).join('');
+  const settings = logo
+    ? `<section class="card">
+    <h2>How it looks</h2>
+    <div class="wm-layout">
+      <div class="wm-preview" id="wm-preview" data-position="${h(logo.position)}" aria-label="Preview of a vertical Short with your logo">
+        <span class="wm-hint">9:16 Short</span>
+        <img src="/logo/file?v=${encodeURIComponent(require('node:path').basename(logo.file))}" alt="Your logo" id="wm-logo" style="width:${Math.round((LOGO_SIZES[logo.size] || 0.2) * 100)}%;opacity:${logo.opacity / 100}">
+      </div>
+      <form method="post" action="/logo" class="stack" id="wm-form">
+        <label>Position<select name="position">${option(LOGO_POSITIONS, logo.position)}</select></label>
+        <label>Size<select name="size">${option([['small', 'Small'], ['medium', 'Medium'], ['large', 'Large']], logo.size)}</select></label>
+        <label>Visibility <span class="muted" id="wm-opacity-value">${logo.opacity}%</span><input type="range" name="opacity" min="10" max="100" step="5" value="${logo.opacity}"></label>
+        <p class="muted small">The logo is kept clear of the buttons and the text that TikTok and YouTube show over a Short. Captions are drawn over the logo.</p>
+        <div class="cap-actions"><button class="primary">Save</button></div>
+      </form>
+    </div>
+  </section>
+  <div class="danger-zone">
+    <p><strong>Remove the logo</strong><br><span class="muted">Shorts already created keep it.</span></p>
+    <form method="post" action="/logo/delete" data-confirm="Remove your logo? Shorts already created keep it."><button class="danger-outline">${icon('trash')}Remove logo</button></form>
+  </div>`
+    : '';
+  return layout(
+    ctx,
+    'Logo watermark',
+    `<div class="page-head">
+  <h1>Logo watermark</h1>
+</div>
+<p class="folder-hint lead">Add your channel logo once. When you create a Short, a split or a clip, tick “Add my logo” to put it on that video; leave it unticked and the video stays clean.</p>
+${ffmpegNotice(ffmpegOk)}
+<section class="card form-card">
+  <h2>${logo ? 'Replace the logo' : 'Add your logo'}</h2>
+  <form id="logo-form" class="stack">
+    <label class="drop" id="logo-drop">${icon('upload')}<strong id="logo-drop-text">Choose an image or drag it here</strong><span>PNG with a transparent background works best. JPG and WebP also work, up to 10 MB.</span><input type="file" id="logo-file" accept="image/png,image/jpeg,image/webp" required aria-label="Logo image"></label>
+    <p class="error" id="logo-error" hidden></p>
+    <div><button class="primary">${icon('upload')}${logo ? 'Replace logo' : 'Add logo'}</button></div>
+  </form>
+</section>
+${settings}`
   );
 }
 
@@ -907,6 +963,7 @@ ${ffmpegNotice(ffmpegOk)}
       </label>
     </div>
     <p class="muted small">Shown for the whole Short as “PART 1”, “PART 2” and so on. Keep it away from the captions: they use the position you saved on a captions page.</p>
+    ${watermarkCheck(ctx)}
 
     <h2>Then, without more clicks</h2>
     <label class="check"><input type="checkbox" name="auto_captions" value="1" data-remember="auto-captions"${captionsProblem ? ' disabled' : ''}> Add captions from the voice</label>
@@ -986,6 +1043,8 @@ function errorPage(ctx, status, message) {
 module.exports = {
   h,
   icon,
+  watermarkCheck,
+  logoPage,
   crumb,
   menu,
   emptyState,

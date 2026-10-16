@@ -39,7 +39,7 @@ function transcriptLines(words) {
   return lines;
 }
 
-module.exports = function register({ route, html, redirect, flash, readForm, getSetting }) {
+module.exports = function register({ route, html, redirect, flash, readForm, getSetting, watermarkFor }) {
   const notFound = (ctx, what) => html(ctx, views.errorPage(ctx, 404, `This ${what} does not exist.`), 404);
   const userCampaign = (ctx, id = ctx.params.id) => db.prepare('SELECT * FROM campaigns WHERE id=? AND user_id=?').get(Number(id), ctx.user.id);
   const readyRecordings = (userId) =>
@@ -236,7 +236,7 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
 
     const title = (form.get('title') || '').replace(/\s+/g, ' ').trim().slice(0, 100) || `${campaign.name} ${views.fmtTime(scene.start)}`.slice(0, 100);
     const repeated = clipping.overlapShare(scene.start, scene.end, campaignClips(campaign).map((c) => ({ start: c.start_s, end: c.end_s })));
-    studio.createCampaignClip(rec, { campaignId: campaign.id, title, ...scene, layout, edl: plan.edl, length: plan.length, subtitles: plan.subtitles, lines: plan.lines });
+    studio.createCampaignClip(rec, { campaignId: campaign.id, title, ...scene, layout, edl: plan.edl, length: plan.length, subtitles: plan.subtitles, lines: plan.lines, watermark: watermarkFor(ctx, form) });
     const notes = [
       autoHook && (plan.hook ? `It opens with a hook from ${views.fmtTime(plan.hook.start)}.` : 'No part of this scene stands out enough to be a hook, so it has none.'),
       !words && 'The episode is not transcribed, so this clip has no captions.',
@@ -319,7 +319,7 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
       // Naslov je početak onoga što se u sceni kaže; korisnik ga mijenja na stranici klipa.
       const said = clipping.saidBetween(words, scene.start, scene.end).replace(/["“”]/g, '');
       const title = (said.length > 60 ? `${said.slice(0, 57).replace(/\s+\S*$/, '')}…` : said.replace(/[\s.,!?…]+$/, '')) || `${campaign.name} ${views.fmtTime(scene.start)}`.slice(0, 100);
-      studio.createCampaignClip(rec, { campaignId: campaign.id, title, ...scene, layout, edl: plan.edl, length: plan.length, subtitles: plan.subtitles, lines: plan.lines });
+      studio.createCampaignClip(rec, { campaignId: campaign.id, title, ...scene, layout, edl: plan.edl, length: plan.length, subtitles: plan.subtitles, lines: plan.lines, watermark: watermarkFor(ctx, form) });
       made++;
       if (plan.hook) hooks++;
     }
@@ -416,6 +416,7 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
     if (asked.error) return fail(asked.error);
 
     const words = transcriptWords(rec) || [];
+    const watermark = watermarkFor(ctx, form);
     const style = getSetting(ctx.user.id, 'caption_style', media.DEFAULT_CAPTION_STYLE);
     const plan = planClip({ words, style, ...scene, hook: asked.hook, trimSilence: form.get('trim_silence') === '1' });
     const problem = lengthProblem(campaign, plan.length);
@@ -428,12 +429,12 @@ module.exports = function register({ route, html, redirect, flash, readForm, get
       const old = clipLines(clip, words);
       lines = media.tidyLines(old.map((line, i) => ({ ...line, text: (form.get(`line_${i}`) ?? line.text).slice(0, 200) })));
       subtitles = lines.length ? media.buildAss(lines, style, media.SHORT_SIZE) : null;
-      if (layout === clip.layout && JSON.stringify(lines.map((l) => l.text)) === JSON.stringify(old.map((l) => l.text))) {
+      if (layout === clip.layout && Boolean(watermark) === Boolean(clip.watermark) && JSON.stringify(lines.map((l) => l.text)) === JSON.stringify(old.map((l) => l.text))) {
         flash(ctx, 'ok', 'Nothing was changed, so the clip stays as it is.');
         return redirect(ctx, back);
       }
     }
-    studio.rerenderCampaignClip(clip.id, { ...scene, layout, edl: plan.edl, length: plan.length, subtitles, lines });
+    studio.rerenderCampaignClip(clip.id, { ...scene, layout, edl: plan.edl, length: plan.length, subtitles, lines, watermark });
     flash(ctx, 'ok', `Clip “${clip.title}” is being created again (${plan.length.toFixed(1)} s).${sameCut ? '' : ' The cut changed, so its captions were taken from the transcript again.'}`);
     redirect(ctx, `/clipping/${campaign.id}`);
   });

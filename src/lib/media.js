@@ -10,6 +10,7 @@ const RATE = 8000; // uzoraka u sekundi za analizu zvuka
 const OUT_W = 1080;
 const OUT_H = 1920;
 const SHORT_SIZE = { width: OUT_W, height: OUT_H };
+const { effectChain } = require('./effects');
 const LAYOUTS = [
   ['blur', 'Whole frame on a blurred background'],
   ['center', 'Crop to the center'],
@@ -44,20 +45,26 @@ function run(bin, args, onStdout, signal) {
 }
 
 /** Vraća {duration, width, height, fps, hasAudio}. `fps` je razlomak kakav daje ffprobe, npr. "60000/1001". */
-async function probe(file) {
+/** Podaci o fajlu. Uz `audioOnly` prihvata i fajl samo sa zvukom (tada je `hasVideo` false). */
+async function probe(file, { audioOnly = false } = {}) {
   const chunks = [];
   await run(
     cfg.ffprobe,
-    ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height,avg_frame_rate', '-of', 'json', file],
+    ['-v', 'error', '-show_entries', 'format=duration:stream=codec_type,width,height,avg_frame_rate:stream_disposition=attached_pic', '-of', 'json', file],
     (d) => chunks.push(d)
   );
   const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
   const streams = data.streams || [];
-  const video = streams.find((s) => s.codec_type === 'video');
-  if (!video) throw new Error('The file has no video track.');
+  // Slika omota u MP3 fajlu je tehnički video, ali nije snimak.
+  const video = streams.find((s) => s.codec_type === 'video' && !(s.disposition && s.disposition.attached_pic));
   const duration = Number(data.format && data.format.duration);
+  if (!video && audioOnly && streams.some((s) => s.codec_type === 'audio') && duration > 0) {
+    return { duration, width: null, height: null, fps: null, hasAudio: true, hasVideo: false };
+  }
+  if (!video) throw new Error('The file has no video track.');
   if (!(duration > 0)) throw new Error('Could not read the video duration.');
   return {
+    hasVideo: true,
     duration,
     width: video.width || null,
     height: video.height || null,
@@ -164,12 +171,44 @@ function shortFilter(layout) {
   return `[0:v]${fill},crop=${OUT_W}:${OUT_H}:${x}:0,setsar=1[v]`;
 }
 
-function renderArgs({ input, output, start, duration, layout, overlayFile = null }) {
-  // Natpis (npr. PART 1) se crta preko gotovog vertikalnog kadra.
-  const filter = overlayFile ? shortFilter(layout).replace(/\[v\]$/, `,ass=${filterPath(overlayFile)}[v]`) : shortFilter(layout);
+// ── Logo (watermark) ──
+const LOGO_POSITIONS = [
+  ['top-right', 'Top right'],
+  ['top-left', 'Top left'],
+  ['bottom-right', 'Bottom right'],
+  ['bottom-left', 'Bottom left'],
+];
+// Širina loga kao dio širine kadra.
+const LOGO_SIZES = { small: 0.14, medium: 0.2, large: 0.28 };
+const DEFAULT_LOGO = { position: 'top-right', size: 'medium', opacity: 85 };
+
+/**
+ * Filter koji crta logo (ulaz broj `input`) preko kadra `from` i daje `to`.
+ * Rubovi su odmaknuti od dugmadi i teksta koje TikTok i YouTube crtaju preko videa.
+ */
+function logoFilter(logo, input, from, to) {
+  const width = Math.round(OUT_W * (LOGO_SIZES[logo.size] || LOGO_SIZES.medium));
+  const x = String(logo.position).endsWith('left') ? '60' : 'W-w-60';
+  const y = String(logo.position).startsWith('bottom') ? 'H-h-460' : '150';
+  const alpha = Math.max(0.1, Math.min(1, Number(logo.opacity) / 100 || 0.85)).toFixed(2);
+  return `[${input}:v]scale=${width}:-1,format=rgba,colorchannelmixer=aa=${alpha}[lg];[${from}][lg]overlay=${x}:${y}[${to}]`;
+}
+
+/** Završni dio filtera: logo (ako je zadan), pa titlovi ili natpis iz ASS fajla preko svega. */
+function finishFrame(frame, { overlayFile = null, logo = null }) {
+  let out = logo ? `${frame.replace(/\[v\]$/, '[base]')};${logoFilter(logo, 1, 'base', 'v')}` : frame;
+  if (overlayFile) out = out.replace(/\[v\]$/, `,ass=${filterPath(overlayFile)}[v]`);
+  return out;
+}
+// Logo čiji fajl više ne postoji se preskače, da Short ipak nastane.
+const usableLogo = (logo) => (logo && logo.file && fs.existsSync(logo.file) ? logo : null);
+
+function renderArgs({ input, output, start, duration, layout, overlayFile = null, logo = null }) {
+  // Natpis (npr. PART 1) i logo se crtaju preko gotovog vertikalnog kadra.
+  const filter = finishFrame(shortFilter(layout), { overlayFile, logo });
   return [
     '-hide_banner', '-nostdin', '-v', 'error', '-y',
-    '-ss', String(start), '-i', input, '-t', String(duration),
+    '-ss', String(start), '-i', input, ...(logo ? ['-i', logo.file] : []), '-t', String(duration),
     '-filter_complex', filter, '-map', '[v]', '-map', '0:a:0?',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
@@ -188,10 +227,112 @@ async function renderShort(job, onProgress, signal) {
   const overlayFile = job.overlay ? path.join(cfg.tmpDir, `label-${crypto.randomBytes(8).toString('hex')}.ass`) : null;
   if (overlayFile) fs.writeFileSync(overlayFile, job.overlay);
   try {
-    await run(cfg.ffmpeg, renderArgs({ ...job, overlayFile }), progressParser(job.duration, onProgress), signal);
+    await run(cfg.ffmpeg, renderArgs({ ...job, overlayFile, logo: usableLogo(job.logo) }), progressParser(job.duration, onProgress), signal);
   } finally {
     if (overlayFile) fs.rm(overlayFile, { force: true }, () => {});
   }
+}
+
+// ── Memovi koji iskaču preko Shorta ──
+const MEME_POSITIONS = [
+  ['center', 'Middle'],
+  ['top', 'Top'],
+  ['bottom', 'Bottom'],
+];
+// Širina mema kao dio širine kadra.
+const MEME_SIZES = { small: 0.5, medium: 0.68, large: 0.9 };
+const MEME_MAX_SHOW = 5; // mem se prikazuje najviše ovoliko sekundi
+const MEME_SOUND_MAX = 8; // zvuk bez slike se pušta najviše ovoliko sekundi
+const MEME_POP = 0.32; // trajanje ulaska sa odskokom
+const MEME_IN = 0.22; // trajanje izlaska
+
+/**
+ * Mjesta za memove: najglasnije sekunde Shorta (i kad se ništa posebno ne ističe), barem 7 s jedna od druge, ne na samom početku
+ * ni na kraju. Mem počinje malo nakon vrha, kao reakcija. `levels` su decibeli po sekundi.
+ */
+function suggestMemeSpots(levels, duration) {
+  if (!levels.length || !(duration > 4)) return [];
+  const want = Math.max(1, Math.min(3, Math.floor(duration / 10)));
+  const picked = [];
+  levels
+    .map((db, s) => ({ s, db }))
+    .filter((c) => c.s >= 1.5 && c.s + 2 <= duration)
+    .sort((a, b) => b.db - a.db)
+    .forEach((c) => {
+      if (picked.length < want && !picked.some((p) => Math.abs(p - c.s) < 7)) picked.push(c.s);
+    });
+  return picked.sort((a, b) => a - b).map((s) => Math.round(Math.min(duration - 1, s + 0.6) * 10) / 10);
+}
+
+/**
+ * Argumenti za Short sa memovima. `placements`: [{ path, at, show, position, size, hasAudio, width, height, sound }].
+ * Mem sa `sound` je samo zvuk: ne crta se ništa, samo se čuje.
+ * Mem je kartica sa zaobljenim uglovima i mekom sjenom. Ulazi "odskokom": iz donjeg položaja
+ * prebaci malo iznad svog mjesta pa se smiri (easeOutBack, 0,32 s), uz pojavljivanje; izlazi
+ * kratkim spuštanjem uz blijeđenje. Zvuk igre se dok mem traje glatko utiša na 35%.
+ */
+function memeArgs({ input, output, placements, hasAudio, fps = '30/1' }) {
+  const args = ['-hide_banner', '-nostdin', '-v', 'error', '-y', '-i', input];
+  for (const p of placements) args.push('-t', p.show.toFixed(2), '-i', p.path);
+  const filters = [];
+  let last = '0:v';
+  // Efekti (zum, trešnja, boje) na samom snimku, ispod memova.
+  const fx = effectChain(placements, { width: OUT_W, height: OUT_H, fps, from: '0:v', to: 'fx' });
+  if (fx) {
+    filters.push(fx);
+    last = 'fx';
+  }
+  placements.forEach((p, i) => {
+    if (p.sound) return;
+    const width = Math.round((OUT_W * (MEME_SIZES[p.size] || MEME_SIZES.medium)) / 2) * 2;
+    const height = Math.round((width * (p.height || 9)) / (p.width || 16) / 2) * 2;
+    const radius = Math.round(width * 0.06);
+    const at = p.at.toFixed(2);
+    const end = p.at + p.show;
+    const top = { top: 230, bottom: OUT_H - height - 560 }[p.position] ?? Math.round((OUT_H - height) / 2);
+    // Pomak od mjesta: ulazak sa odskokom i izlazak spuštanjem.
+    const P = `min(1,(t-${at})/${MEME_POP})`;
+    const Q = `max(0,(t-${(end - MEME_IN).toFixed(2)})/${MEME_IN})`;
+    const move = `110*(1-(1+2.70158*pow(${P}-1,3)+1.70158*pow(${P}-1,2)))+70*${Q}*${Q}`;
+    const show = `enable='between(t,${at},${end.toFixed(2)})':eof_action=pass`;
+    const rounded = `255*lte(hypot(max(0,abs(X-W/2)-(W/2-${radius})),max(0,abs(Y-H/2)-(H/2-${radius}))),${radius})`;
+    filters.push(
+      `[${i + 1}:v]scale=${width}:${height},setsar=1,format=yuva444p,geq=lum='lum(X,Y)':cb='cb(X,Y)':cr='cr(X,Y)':a='${rounded}',` +
+        `fade=t=in:st=0:d=0.2:alpha=1,fade=t=out:st=${Math.max(0, p.show - MEME_IN).toFixed(2)}:d=${MEME_IN}:alpha=1,` +
+        `setpts=PTS-STARTPTS+${at}/TB,split[m${i}][c${i}]`,
+      // Sjena: ista kartica, crna i prozirna, razmazana i spuštena za 16 px.
+      `[c${i}]colorchannelmixer=rr=0:rg=0:rb=0:gr=0:gg=0:gb=0:br=0:bg=0:bb=0,format=yuva444p,pad=iw+80:ih+80:40:40:color=black@0,boxblur=luma_radius=18:luma_power=2:alpha_radius=18:alpha_power=2,colorchannelmixer=aa=0.6[s${i}]`,
+      `[${last}][s${i}]overlay=x=(W-w)/2:y='${top - 40 + 16}+${move}':${show}[b${i}]`,
+      `[b${i}][m${i}]overlay=x=(W-w)/2:y='${top}+${move}':${show}[v${i}]`
+    );
+    last = `v${i}`;
+  });
+  const sounds = placements.map((p, i) => (p.hasAudio ? i : -1)).filter((i) => i >= 0);
+  const map = ['-map', last === '0:v' ? '0:v:0' : `[${last}]`];
+  if (hasAudio || sounds.length) {
+    // Udio utišavanja 0–1: raste 0,15 s na ulazu mema, pada 0,25 s na izlazu.
+    const duck = placements
+      .map((p) => `min(max((t-${p.at.toFixed(2)})/0.15,0),1)*min(max((${(p.at + p.show).toFixed(2)}-t)/0.25,0),1)`)
+      .join('+');
+    filters.push(hasAudio ? `[0:a:0]volume='1-0.65*min(1,${duck})':eval=frame[game]` : 'anullsrc=r=48000:cl=stereo[game]');
+    for (const i of sounds) {
+      const ms = Math.round(placements[i].at * 1000);
+      filters.push(`[${i + 1}:a:0]aformat=channel_layouts=stereo,afade=t=out:st=${Math.max(0, placements[i].show - 0.2).toFixed(2)}:d=0.2,adelay=${ms}|${ms}[a${i}]`);
+    }
+    filters.push(`[game]${sounds.map((i) => `[a${i}]`).join('')}amix=inputs=${sounds.length + 1}:duration=first:normalize=0[aout]`);
+    map.push('-map', '[aout]');
+  }
+  return [
+    ...args,
+    '-filter_complex', filters.join(';'), ...map,
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+    ...(map.length > 2 ? ['-c:a', 'aac', '-b:a', '160k'] : ['-an']),
+    '-movflags', '+faststart', '-progress', 'pipe:1', '-nostats', output,
+  ];
+}
+
+async function renderMemes(job, onProgress, signal) {
+  await run(cfg.ffmpeg, memeArgs(job), progressParser(job.duration, onProgress), signal);
 }
 
 /**
@@ -471,7 +612,7 @@ function buildLabelAss({ text, position }, { width, height }) {
  * Argumenti za klip složen iz više dijelova istog izvora (npr. hook, pa scena bez pauza).
  * Dijelovi se režu i spajaju, pa se rezultat pretvara u vertikalni kadar i dobija titlove.
  */
-function edlArgs({ input, output, edl, layout, overlayFile = null }) {
+function edlArgs({ input, output, edl, layout, overlayFile = null, logo = null }) {
   // Čita se samo raspon izvora koji dijelovi pokrivaju; vremena dijelova se računaju od njegovog početka.
   const from = Math.min(...edl.map((p) => p.start));
   const to = Math.max(...edl.map((p) => p.end));
@@ -480,11 +621,10 @@ function edlArgs({ input, output, edl, layout, overlayFile = null }) {
     return `[0:v]trim=${range},setpts=PTS-STARTPTS[v${i}];[0:a:0]atrim=${range},asetpts=PTS-STARTPTS[a${i}]`;
   });
   const joined = `${edl.map((_, i) => `[v${i}][a${i}]`).join('')}concat=n=${edl.length}:v=1:a=1[cv][ca]`;
-  let frame = shortFilter(layout).replace('[0:v]', '[cv]');
-  if (overlayFile) frame = frame.replace(/\[v\]$/, `,ass=${filterPath(overlayFile)}[v]`);
+  const frame = finishFrame(shortFilter(layout).replace('[0:v]', '[cv]'), { overlayFile, logo });
   return [
     '-hide_banner', '-nostdin', '-v', 'error', '-y',
-    '-ss', from.toFixed(3), '-to', to.toFixed(3), '-i', input,
+    '-ss', from.toFixed(3), '-to', to.toFixed(3), '-i', input, ...(logo ? ['-i', logo.file] : []),
     '-filter_complex', [...cuts, joined, frame].join(';'), '-map', '[v]', '-map', '[ca]',
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart',
@@ -498,7 +638,7 @@ async function renderEdl(job, onProgress, signal) {
   if (overlayFile) fs.writeFileSync(overlayFile, job.overlay);
   const length = job.edl.reduce((sum, p) => sum + (p.end - p.start), 0);
   try {
-    await run(cfg.ffmpeg, edlArgs({ ...job, overlayFile }), progressParser(length, onProgress), signal);
+    await run(cfg.ffmpeg, edlArgs({ ...job, overlayFile, logo: usableLogo(job.logo) }), progressParser(length, onProgress), signal);
   } finally {
     if (overlayFile) fs.rm(overlayFile, { force: true }, () => {});
   }
@@ -540,6 +680,17 @@ module.exports = {
   waveform,
   thumbnail,
   renderArgs,
+  MEME_POSITIONS,
+  MEME_SIZES,
+  MEME_MAX_SHOW,
+  MEME_SOUND_MAX,
+  suggestMemeSpots,
+  memeArgs,
+  renderMemes,
+  LOGO_POSITIONS,
+  LOGO_SIZES,
+  DEFAULT_LOGO,
+  logoFilter,
   renderShort,
   joinArgs,
   renderJoined,
